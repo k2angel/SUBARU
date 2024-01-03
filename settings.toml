@@ -1,5 +1,5 @@
 directory = "./imgs/"
-refresh_token = ""
+refresh_token = []
 
 [folder]
 tag = []
