@@ -1,0 +1,10 @@
+directory = "./imgs/"
+refresh_token = ""
+
+[folder]
+tag = []
+user = []
+
+[ignore]
+tag = []
+user = []
