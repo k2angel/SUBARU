@@ -1,5 +1,19 @@
-directory = "./imgs/"
+directory = "./img"
 refresh_token = []
+
+[notification]
+enable = true
+
+[notification.desktop]
+enable = true
+
+[notification.discord]
+enable = false
+webhookUrl = ""
+
+[notification.discord.mention]
+enable = false
+discordId = ""
 
 [folder]
 tag = []
