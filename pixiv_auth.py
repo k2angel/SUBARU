@@ -53,6 +53,7 @@ def print_auth_token_response(response):
     print("access_token:", access_token)
     print("refresh_token:", refresh_token)
     print("expires_in:", data.get("expires_in", 0))
+    return refresh_token
 
 
 def login():
