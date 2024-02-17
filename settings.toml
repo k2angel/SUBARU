@@ -16,9 +16,11 @@ enable = false
 discordId = ""
 
 [folder]
+enable = true
 tag = []
 user = []
 
 [ignore]
+enable = true
 tag = []
 user = []
