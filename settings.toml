@@ -1,6 +1,18 @@
 directory = "./img"
 refresh_token = []
 
+[folder]
+enable = true
+tag = []
+
+[ignore]
+enable = true
+tag = []
+user = []
+
+[ugoira2gif]
+enable = true
+
 [notification]
 enable = true
 
@@ -14,13 +26,3 @@ webhookUrl = ""
 [notification.discord.mention]
 enable = false
 discordId = ""
-
-[folder]
-enable = true
-tag = []
-user = []
-
-[ignore]
-enable = true
-tag = []
-user = []
