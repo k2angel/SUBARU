@@ -159,9 +159,31 @@ class Client:
                 "create_date": create_date
             }
             if illust_type == "ugoira":
-                ugoira_data = self.aapi.ugoira_metadata(id)
-                data["attachments"].append(ugoira_data["ugoira_metadata"]["zip_urls"]["medium"])
-                data["delays"] = [frame["delay"] for frame in ugoira_data["ugoira_metadata"]["frames"]]
+                while True:
+                    try:
+                        ugoira_data = self.aapi.ugoira_metadata(id)
+                        data["attachments"].append(ugoira_data["ugoira_metadata"]["zip_urls"]["medium"])
+                        data["delays"] = [frame["delay"] for frame in ugoira_data["ugoira_metadata"]["frames"]]
+                    except PixivError as e:
+                        if "RemoteDisconnected" in str(e):
+                            print_("[!] RemoteDisconnected.")
+                        else:
+                            print(str(e))
+                        time.sleep(1)
+                    except KeyError as e:
+                        message = data["error"]["message"]
+                        if message == "RateLimit" or message == "Rate Limit":
+                            print_("[!] RateLimit.")
+                            time.sleep(180)
+                        else:
+                            print(data)
+                            print(str(e))
+                            time.sleep(1)
+                            break
+                    except TypeError:
+                        break
+                    else:
+                        break
             else:
                 try:
                     data["attachments"].append(illust["meta_single_page"]["original_image_url"])
@@ -196,7 +218,7 @@ class Client:
             self.parse(illust)
         except PixivError as e:
             if "RemoteDisconnected" in str(e):
-                pass
+                print_("[!] RemoteDisconnected.")
             else:
                 print(str(e))
             time.sleep(1)
@@ -227,7 +249,7 @@ class Client:
                 next_qs = self.aapi.parse_qs(data["next_url"])
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
-                    pass
+                    print_("[!] RemoteDisconnected.")
                 else:
                     print(str(e))
                 time.sleep(1)
@@ -246,6 +268,8 @@ class Client:
             except TypeError:
                 break
             else:
+                if next_qs is None:
+                    break
                 time.sleep(1)
 
     def bookmarks(self, page):
@@ -259,7 +283,7 @@ class Client:
                 next_qs = self.aapi.parse_qs(data["next_url"])
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
-                    pass
+                    print_("[!] RemoteDisconnected.")
                 else:
                     print(str(e))
                 time.sleep(1)
@@ -278,6 +302,8 @@ class Client:
             except TypeError:
                 break
             else:
+                if next_qs is None:
+                    break
                 time.sleep(1)
 
     def search(self, word):
@@ -289,9 +315,10 @@ class Client:
                 for illust in illusts:
                     self.parse(illust)
                 next_qs = self.aapi.parse_qs(data["next_url"])
+
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
-                    pass
+                    print_("[!] RemoteDisconnected.")
                 else:
                     print(str(e))
                 time.sleep(1)
@@ -310,6 +337,8 @@ class Client:
             except TypeError:
                 break
             else:
+                if next_qs is None:
+                    break
                 time.sleep(1)
 
     def recent(self, page):
@@ -323,7 +352,7 @@ class Client:
                 next_qs = self.aapi.parse_qs(data["next_url"])
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
-                    pass
+                    print_("[!] RemoteDisconnected.")
                 else:
                     print(str(e))
                 time.sleep(1)
@@ -430,6 +459,7 @@ if __name__ == "__main__":
         elif mode == "b" or mode == "r":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print("")
             page = input_("[PAGE] > ")
             with console.status("[bold green]Fetching data...") as status:
                 if mode == "b":
@@ -445,7 +475,8 @@ if __name__ == "__main__":
         elif mode == "s":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-            word = input_("[WORD] > ")
+            print("")
+            word = Write.Input(Center.XCenter("[WORD] > ", spaces=40), Colors.green_to_black, interval=0)
             with console.status("[bold green]Fetching data...") as status:
                 client.search(word)
             print_("[*] Fetch done.")
