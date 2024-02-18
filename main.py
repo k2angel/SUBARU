@@ -91,7 +91,7 @@ class Client:
                     while True:
                         try:
                             self.aapi.download(attachment, path=path)
-                            if data["type"] == "ugoira":
+                            if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 threading.Thread(target=ugoira2gif, args=(file, path, data["id"], data["delays"]))
                                 time.sleep(1)
                             else:
@@ -192,9 +192,10 @@ class Client:
             self.queue.append(data)
 
     def check(self, id: int, user: dict, tags: list, is_bookmarked: bool, is_muted: bool):
-        if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(settings["ignore"]["tag"]) or is_muted:
-            #print_("ignore")
-            return False
+        if settings["ignore"]["enable"]:
+            if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(settings["ignore"]["tag"]) or is_muted:
+                #print_("ignore")
+                return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
         if settings["folder"]["enable"]:
@@ -375,7 +376,7 @@ class Client:
 
 def notification(message: str):
     def desktop(message: str):
-        notice.notify(title="Notification", message=message, app_name="Tumbl-Ripper", app_icon="./icon.ico")
+        notice.notify(title="Notification", message=message, app_name="SUBARU", app_icon="./icon.ico")
 
     def discord(message: str):
         if settings["notification"]["discord"]["webhookUrl"] != "":
@@ -460,7 +461,11 @@ if __name__ == "__main__":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
             print("")
-            page = input_("[PAGE] > ")
+            try:
+                page = int(input_("[PAGE] > "))
+            except ValueError:
+                print_("[!] Error.")
+                continue
             with console.status("[bold green]Fetching data...") as status:
                 if mode == "b":
                     client.bookmarks(page)
