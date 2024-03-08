@@ -2,6 +2,7 @@ import datetime
 import math
 import os
 import pickle
+import pprint
 import re
 import shutil
 import threading
@@ -28,6 +29,7 @@ class Client:
         self.aapi = AppPixivAPI()
         self.aapi.auth(refresh_token=refresh_token)
         self.queue = deque()
+        self.users = 0
 
     def download(self):
         def convert_size(size):
@@ -142,9 +144,10 @@ class Client:
             "is_followed": illust["user"]["is_followed"]
         }
         tags = [re.sub(r"\d+users", "", tag["name"]) for tag in illust["tags"]]
+        total_bookmarks = illust["total_bookmarks"]
         is_bookmarked = illust["is_bookmarked"]
         is_muted = illust["is_muted"]
-        if result := self.check(id, user, tags, is_bookmarked, is_muted):
+        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted):
             if type(result) is str:
                 folder = result
             else:
@@ -191,11 +194,14 @@ class Client:
                     data["attachments"] = [attachment["image_urls"]["original"] for attachment in illust["meta_pages"]]
             self.queue.append(data)
 
-    def check(self, id: int, user: dict, tags: list, is_bookmarked: bool, is_muted: bool):
+    def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool):
         if settings["ignore"]["enable"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(settings["ignore"]["tag"]) or is_muted:
                 #print_("ignore")
                 return False
+        if self.users > total_bookmarks:
+            #print(f"{self.users} < {total_bookmarks}")
+            return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
         if settings["folder"]["enable"]:
@@ -308,6 +314,9 @@ class Client:
                 time.sleep(1)
 
     def search(self, word):
+        if s := re.search(r"--(\d+)users", word):
+            self.users = int(s.group(1))
+            #word = word.replace(s.group(0), "")
         next_qs = {"word": word}
         while True:
             data = self.aapi.search_illust(**next_qs)
@@ -316,7 +325,6 @@ class Client:
                 for illust in illusts:
                     self.parse(illust)
                 next_qs = self.aapi.parse_qs(data["next_url"])
-
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -341,6 +349,7 @@ class Client:
                 if next_qs is None:
                     break
                 time.sleep(1)
+        self.users = 0
 
     def recent(self, page):
         next_qs = {}
