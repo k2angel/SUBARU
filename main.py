@@ -85,6 +85,7 @@ class Client:
                 os.utime(gif_path, times=(ctime, ctime))
                 shutil.rmtree(ugoira_path)
             os.remove(ugoira_zip)
+            logger.info(f"ugoira2gif: {ugoira_zip} -> {ugoira_path}")
 
         if qsize := len(self.queue):
             files_num = 0
@@ -107,12 +108,10 @@ class Client:
                         continue
                     while True:
                         try:
-
                             self.aapi.download(attachment, path=path)
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
-                                #threading.Thread(target=ugoira2gif, args=(file, path, data["id"], data["delays"])).start()
+                                # threading.Thread(target=ugoira2gif, args=(file, path, data["id"], data["delays"])).start()
                                 ugoira2gif(file, path, data["id"], data["delays"])
-                                logger.info(f"ugoira2gif: {file}")
                             else:
                                 Image.open(file)
                                 logger.info(attachment)
@@ -132,6 +131,7 @@ class Client:
                             if str(e) == "[Errno 28] No space left on device":
                                 with open("./queue", "wb") as f:
                                     pickle.dump(self.queue, f)
+                                print_("[!] No space left on device.")
                             elif type(e) == FileNotFoundError:
                                 break
                             else:
@@ -196,12 +196,12 @@ class Client:
                         time.sleep(1)
                     except KeyError as e:
                         try:
-                            message = data["error"]["message"]
+                            message = ugoira_data["error"]["message"]
                             if message == "RateLimit" or message == "Rate Limit":
                                 print_("[!] RateLimit.")
                                 time.sleep(180)
                             else:
-                                print(data)
+                                print(ugoira_data)
                                 logger.error(f"{type(e)}: {str(e)}")
                                 time.sleep(1)
                                 break
@@ -220,11 +220,12 @@ class Client:
 
     def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool):
         if settings["ignore"]["enable"]:
-            if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(settings["ignore"]["tag"]) or is_muted:
-                logger.info("ignore")
+            if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
+                    settings["ignore"]["tag"]) or is_muted:
+                # logger.info("ignore")
                 return False
         if self.users > total_bookmarks:
-            logger.info(f"{self.users} > {total_bookmarks}")
+            # logger.info(f"{self.users} > {total_bookmarks}")
             return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
@@ -232,7 +233,7 @@ class Client:
             if not set(tags).isdisjoint(settings["folder"]["tag"]):
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
-                        logger.info(ftag)
+                        # logger.info(ftag)
                         return ftag
         return True
 
@@ -242,11 +243,11 @@ class Client:
             date = datetime.datetime.fromisoformat(self.queue[-1]["create_date"])
         else:
             date = datetime.datetime.fromisoformat(start_date)
-            print(start_date)
         logger.info(str(date.date()))
         next_qs["start_date"] = str(date.date())
         next_qs["end_date"] = "2007-09-10"
         next_qs["offset"] = 0
+        logger.info(next_qs)
         return next_qs
 
     def illust(self, id):
@@ -358,7 +359,6 @@ class Client:
         print("")
         notification(info)
 
-
     def search(self, word):
         self.expires_check()
         if s := re.search(r"--(\d+)users", word):
@@ -381,7 +381,7 @@ class Client:
                 create_date = illusts[-1]["create_date"]
                 next_qs = self.aapi.parse_qs(data["next_url"])
                 logger.info(f"offset: {int(next_qs['offset']) - 30}, create_date: {create_date}")
-                c = c+1
+                c = c + 1
                 if c == page:
                     break
             except PixivError as e:
