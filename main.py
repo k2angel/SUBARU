@@ -10,8 +10,8 @@ import time
 import tomllib
 import zipfile
 from collections import deque
-from logging import (DEBUG, INFO, FileHandler, Formatter, StreamHandler,
-                     getLogger)
+from itertools import count
+from logging import DEBUG, FileHandler, Formatter, getLogger
 
 from discord_webhook import DiscordWebhook
 from PIL import Image, UnidentifiedImageError
@@ -30,21 +30,42 @@ class Client:
     def __init__(self, refresh_token):
         self.aapi = AppPixivAPI()
         self.refresh_token = refresh_token
-        auth_data = self.aapi.auth(refresh_token=refresh_token)
-        logger.info(auth_data)
-        self.access_token_get = time.time()
-        self.expires_in = auth_data["expires_in"]
+        self.access_token_get, self.expires_in = self.login()
         self.queue = deque()
         self.users = 0
+        self.ugoira = None
+        self.page = count()
+
+    def login(self):
+        try:
+            auth_data = self.aapi.auth(refresh_token=self.refresh_token)
+        except PixivError as e:
+            logger.error(f"{type(e)}: {str(e)}")
+            if "RemoteDisconnected" in str(e):
+                print_("[!] Authentication error!: RemoteDisconnected.")
+            elif "refresh_token is set" in str(e):
+                print_("[!] Authentication error!: refresh token is nothing.")
+                exit()
+            elif "check refresh_token" in str(e):
+                print_("[!] Authentication error!: Invalid refresh token.")
+                exit()
+            else:
+                print_("[!] Authentication error!")
+        except Exception as e:
+            logger.error(f"{type(e)}: {str(e)}")
+            exit()
+        else:
+            print_("[*] Login successfully!")
+            logger.debug(auth_data)
+            return time.time(), auth_data["expires_in"]
 
     def expires_check(self):
         elapsed_time = time.time() - self.access_token_get
         if elapsed_time >= self.expires_in:
             print_("[!] Expires in access token!")
             auth_data = self.aapi.auth(refresh_token=self.refresh_token)
-            logger.info(auth_data)
-            self.access_token_get = time.time()
-            self.expires_in = auth_data["expires_in"]
+            logger.debug(auth_data)
+            self.access_token_get, self.expires_in = self.login()
 
     def download(self):
         def convert_size(size):
@@ -58,34 +79,38 @@ class Client:
             gif_path = os.path.join(path, f"{id}_p0 ugoira.gif")
             ctime = os.path.getctime(ugoira_zip)
             images = list()
-            with zipfile.ZipFile(ugoira_zip) as zf:
-                files = zf.namelist()
-                ugoira_path = str(os.path.join(settings["directory"], "ugoira", str(id)))
-                zf.extractall(ugoira_path)
-                delays_set = list(set(delays))
-                gcd = math.gcd(*delays_set)
-            for delay, file in zip(delays, files):
-                image = Image.open(os.path.join(ugoira_path, file)).quantize()
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
-                for _ in range(math.floor(delay / gcd)):
-                    images.append(image)
+            try:
+                with zipfile.ZipFile(ugoira_zip) as zf:
+                    files = zf.namelist()
+                    ugoira_path = str(os.path.join(settings["directory"], "ugoira", str(id)))
+                    zf.extractall(ugoira_path)
+                    delays_set = list(set(delays))
+                    gcd = math.gcd(*delays_set)
+            except zipfile.BadZipFile as e:
+                logger.error(f"{type(e)}: {str(e)}")
             else:
-                try:
-                    images[0].save(
-                        gif_path,
-                        save_all=True,
-                        append_images=images[1:],
-                        optimize=False,
-                        duration=gcd,
-                        loop=0,
-                    )
-                except AttributeError as e:
-                    logger.error(f"{type(e)}: {str(e)}")
-                os.utime(gif_path, times=(ctime, ctime))
-                shutil.rmtree(ugoira_path)
+                for delay, file in zip(delays, files):
+                    image = Image.open(os.path.join(ugoira_path, file)).quantize()
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    for _ in range(math.floor(delay / gcd)):
+                        images.append(image)
+                else:
+                    try:
+                        images[0].save(
+                            gif_path,
+                            save_all=True,
+                            append_images=images[1:],
+                            optimize=False,
+                            duration=gcd,
+                            loop=0,
+                        )
+                    except AttributeError as e:
+                        logger.error(f"{type(e)}: {str(e)}")
+                    os.utime(gif_path, times=(ctime, ctime))
+                    shutil.rmtree(ugoira_path)
+                    logger.debug(f"ugoira2gif: {ugoira_zip} -> {gif_path}")
             os.remove(ugoira_zip)
-            logger.info(f"ugoira2gif: {ugoira_zip} -> {ugoira_path}")
 
         if qsize := len(self.queue):
             files_num = 0
@@ -112,12 +137,13 @@ class Client:
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 # threading.Thread(target=ugoira2gif, args=(file, path, data["id"], data["delays"])).start()
                                 ugoira2gif(file, path, data["id"], data["delays"])
+                                files_size = files_size + os.path.getsize(os.path.exists(os.path.join(path, f"{data['id']}_p0 ugoira.gif")))
                             else:
                                 Image.open(file)
-                                logger.info(attachment)
+                                # logger.debug(attachment)
+                                files_size = files_size + os.path.getsize(file)
+                                time.sleep(1)
                             files_num = files_num + 1
-                            files_size = files_size + os.path.getsize(file)
-                            time.sleep(1)
                             break
                         except (ProtocolError, UnidentifiedImageError, ChunkedEncodingError, ConnectionError,
                                 PixivError) as e:
@@ -126,13 +152,14 @@ class Client:
                         except KeyboardInterrupt:
                             print_("[*] Stopped.")
                             input()
+                            self.expires_check()
                         except OSError as e:
-                            logger.error(f"{type(e)}: {str(e)}")
                             if str(e) == "[Errno 28] No space left on device":
                                 with open("./queue", "wb") as f:
                                     pickle.dump(self.queue, f)
                                 print_("[!] No space left on device.")
-                            elif type(e) == FileNotFoundError:
+                            elif type(e) is FileNotFoundError:
+                                logger.error(f"{type(e)}: {str(e)}")
                                 break
                             else:
                                 logger.error(f"{type(e)}: {str(e)}")
@@ -168,12 +195,12 @@ class Client:
         total_bookmarks = illust["total_bookmarks"]
         is_bookmarked = illust["is_bookmarked"]
         is_muted = illust["is_muted"]
-        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted):
+        illust_type = illust["type"]
+        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type):
             if type(result) is str:
                 folder = result
             else:
                 folder = ""
-            illust_type = illust["type"]
             create_date = illust["create_date"]
             data = {
                 "id": id,
@@ -218,14 +245,19 @@ class Client:
                     data["attachments"] = [attachment["image_urls"]["original"] for attachment in illust["meta_pages"]]
             self.queue.append(data)
 
-    def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool):
+    def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool,
+              illust_type: bool):
         if settings["ignore"]["enable"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
-                # logger.info("ignore")
+                # logger.debug("ignore")
                 return False
         if self.users > total_bookmarks:
-            # logger.info(f"{self.users} > {total_bookmarks}")
+            # logger.debug(f"{self.users} > {total_bookmarks}")
+            return False
+        if self.ugoira and not illust_type == "ugoira":
+            return False
+        elif self.ugoira is False and illust_type != "ugoira":
             return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
@@ -233,7 +265,7 @@ class Client:
             if not set(tags).isdisjoint(settings["folder"]["tag"]):
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
-                        # logger.info(ftag)
+                        # logger.debug(ftag)
                         return ftag
         return True
 
@@ -243,12 +275,31 @@ class Client:
             date = datetime.datetime.fromisoformat(self.queue[-1]["create_date"])
         else:
             date = datetime.datetime.fromisoformat(start_date)
-        logger.info(str(date.date()))
+        logger.debug(str(date.date()))
         next_qs["start_date"] = str(date.date())
         next_qs["end_date"] = "2007-09-10"
         next_qs["offset"] = 0
-        logger.info(next_qs)
+        logger.debug(next_qs)
         return next_qs
+
+    def init_option(self):
+        self.users = 0
+        self.ugoira = None
+        self.page = count()
+
+    def option(self):
+        option = Write.Input(Center.XCenter("[OPTION] > ", spaces=40), Colors.green_to_black, interval=0,
+                               hide_cursor=False)
+        if s := re.search(r"(\d+)users", option):
+            self.users = int(s.group(1))
+        if s := re.search(r"(\d+)page", option):
+            self.page = range(int(s.group(1)))
+        if "ugoira-not" in option:
+            self.ugoira = False
+        elif "ugoira" in option:
+            self.ugoira = True
+        # print_(f"[OPTION] users: users: {self.users}, page: {page}, ugoira: {self.ugoira}")
+        logger.debug(f"OPTION: users={self.users}, page={self.page}, ugoira={self.ugoira}")
 
     def illust(self, id):
         self.expires_check()
@@ -263,7 +314,7 @@ class Client:
                 logger.error(f"{type(e)}: {str(e)}")
             time.sleep(1)
         except KeyError as e:
-            print(data)
+            logger.debug(data)
             logger.error(f"{type(e)}: {str(e)}")
         else:
             time.sleep(1)
@@ -282,14 +333,14 @@ class Client:
             return
         for type in ["illust", "manga"]:
             next_qs = {"user_id": id, "type": type}
-            while True:
+            for i in self.page:
                 data = self.aapi.user_illusts(**next_qs)
                 try:
                     illusts = data["illusts"]
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    logger.info(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
+                    logger.debug(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -305,7 +356,7 @@ class Client:
                         next_qs = self.offsetLimitBypass(next_qs)
                         time.sleep(1)
                     else:
-                        print(data)
+                        logger.debug(data)
                         logger.error(f"{type(e)}: {str(e)}")
                         break
                 except TypeError:
@@ -315,17 +366,17 @@ class Client:
                         break
                     time.sleep(1)
 
-    def bookmarks(self, page):
+    def bookmarks(self):
         self.expires_check()
         next_qs = {"user_id": self.aapi.user_id}
-        for i in range(page):
+        for i in self.page:
             data = self.aapi.user_bookmarks_illust(**next_qs)
             try:
                 illusts = data["illusts"]
                 for illust in illusts:
                     self.parse(illust)
                 next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.info(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
+                logger.debug(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -342,7 +393,7 @@ class Client:
                         next_qs = self.offsetLimitBypass(next_qs)
                         time.sleep(1)
                     else:
-                        print(data)
+                        logger.debug(data)
                         logger.error(f"{type(e)}: {str(e)}")
                         break
                 except KeyError:
@@ -353,7 +404,7 @@ class Client:
                 if next_qs is None:
                     break
                 time.sleep(1)
-        info = f"PAGE: {page}\nILLUSTS: {len(self.queue)}"
+        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
         print("")
         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
         print("")
@@ -361,18 +412,9 @@ class Client:
 
     def search(self, word):
         self.expires_check()
-        if s := re.search(r"--(\d+)users", word):
-            self.users = int(s.group(1))
-            word = word.replace(s.group(0), "")
-        if s := re.search(r"--(\d+)page", word):
-            page = int(s.group(1))
-            word = word.replace(s.group(0), "")
-        else:
-            page = 0
         next_qs = {"word": word}
-        c = 0
         create_date = ""
-        while True:
+        for i in self.page:
             data = self.aapi.search_illust(**next_qs)
             try:
                 illusts = data["illusts"]
@@ -380,10 +422,7 @@ class Client:
                     self.parse(illust)
                 create_date = illusts[-1]["create_date"]
                 next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.info(f"offset: {int(next_qs['offset']) - 30}, create_date: {create_date}")
-                c = c + 1
-                if c == page:
-                    break
+                logger.debug(f"offset: {int(next_qs['offset']) - 30}, create_date: {create_date}")
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -412,19 +451,18 @@ class Client:
         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
         print("")
         notification(info)
-        self.users = 0
 
-    def recent(self, page):
+    def recent(self):
         self.expires_check()
         next_qs = {}
-        for i in range(page):
+        for i in self.page:
             data = self.aapi.illust_new(**next_qs)
             try:
                 illusts = data["illusts"]
                 for illust in illusts:
                     self.parse(illust)
                 next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.info(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
+                logger.debug(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -441,7 +479,7 @@ class Client:
                         next_qs = self.offsetLimitBypass(next_qs)
                         time.sleep(1)
                     else:
-                        print(data)
+                        logger.debug(data)
                         logger.error(f"{type(e)}: {str(e)}")
                         break
                 except KeyError:
@@ -451,7 +489,7 @@ class Client:
             else:
                 time.sleep(1)
 
-        info = f"PAGE: {page}\nILLUSTS: {len(self.queue)}"
+        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
         print("")
         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
         print("")
@@ -484,9 +522,10 @@ def input_(text: str):
     return Write.Input(Center.XCenter(text, spaces=40), Colors.green_to_black, interval=0)
 
 
-def settings():
+def load_settings():
     with open("settings.toml", "rb") as f:
         settings = tomllib.load(f)
+    print_("[*] Load settings.")
     return settings
 
 
@@ -497,6 +536,7 @@ def login():
         settings["refresh_token"].append(refresh_token)
         with open("settings.toml", "wb") as f:
             dump(settings, f)
+        return refresh_token
 
 
 def make_logger(name):
@@ -525,13 +565,20 @@ menu = """
 [d] Download  [b] Bookmarks  [s] Search
 [r] Recent    [l] Login      [R] Reload
 """
+print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
 version = "1.0"
 System.Title(f"SUBARU v{version}")
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 logger = make_logger(__name__)
-settings = settings()
-client = Client(settings["refresh_token"][0])
+settings = load_settings()
+try:
+    client = Client(settings["refresh_token"][0])
+except IndexError as e:
+    logger.error(f"{type(e)}: {str(e)}")
+    print_("[!] refresh token is nothing.")
+    refresh_token = login()
+    client = Client(refresh_token)
 
 console = Console()
 
@@ -547,6 +594,8 @@ if __name__ == "__main__":
             urls = input_("[URL] > ").split()
             for url in urls:
                 if m := re.match(r"https://(www\.)?pixiv\.net/(users|artworks)/(\d+)", url):
+                    if m.group(2) == "users" and len(urls) == 1:
+                        client.option()
                     with console.status("[bold green]Fetching data...") as status:
                         if m.group(2) == "artworks":
                             client.illust(m.group(3))
@@ -556,40 +605,40 @@ if __name__ == "__main__":
             try:
                 client.download()
             except Exception as e:
-                print(type(e))
-                print_(str(e))
+                logger.error(f"{type(e)}: {str(e)}")
         elif mode == "b" or mode == "r":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
             print("")
-            try:
-                page = int(input_("[PAGE] > "))
-            except ValueError:
-                print_("[!] Error.")
-                continue
+            client.option()
             with console.status("[bold green]Fetching data...") as status:
                 if mode == "b":
-                    client.bookmarks(page)
+                    client.bookmarks()
                 else:
-                    client.recent(page)
+                    client.recent()
             print_("[*] Fetch done.")
             try:
                 client.download()
             except Exception as e:
-                print(type(e))
-                print_(str(e))
+                logger.error(f"{type(e)}: {str(e)}")
         elif mode == "s":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
             print("")
             word = Write.Input(Center.XCenter("[WORD] > ", spaces=40), Colors.green_to_black, interval=0,
                                hide_cursor=False)
+            client.option()
             try:
                 with console.status("[bold green]Fetching data...") as status:
                     client.search(word)
                 print_("[*] Fetch done.")
                 client.download()
             except Exception as e:
-                print(type(e))
-                print_(str(e))
+                logger.error(f"{type(e)}: {str(e)}")
+        elif mode == "R":
+            System.Clear()
+            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print("")
+            settings = load_settings()
+        client.init_option()
         input_("[*] Press ENTER to go back.")

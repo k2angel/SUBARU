@@ -1,10 +1,12 @@
 # SUBARU
-pixiv downloader.
+渋ダウンローダー.
 
 ## How to Use
-1. login_run.batを起動
-2. pixivにログインしたらコンソール画面にrefresh_tokenが表示されるのでコピー
-3. settings.tomlに貼り付ける ```refresh_token = ["<REFRESH_TOKEN>""]```
+1. ```pip install -r requirements.txt``` を実行
+2. ``main.py`` を実行
+3. 初回起動時はchromeが起動するのでpixivにログインする
+4. まんこ
+
 
 ## Features
  - ダウンロード機能
@@ -13,18 +15,24 @@ pixiv downloader.
    - ブックマークしたイラスト
    - フォローしたユーザーの新着イラスト
    - 検索したイラスト全て
-     - 引数によりブックマーク数でフィルタすることが可能 ```<WORD> --<bookmark>users```
+ - オプション機能
+   - ``<bookmarks>users`` -> 特定のブックマーク数以下のイラストをダウンロードしないようにする
+   - ``<page>page`` -> 何ページまで検索するか｡ 入力しなかった場合全てのページを検索 (1ページ30イラスト)
+   - ``ugoira`` -> うごイラのみをダウンロード
+   - ``ugoira-not`` -> うごイラ以外をダウンロード
  - ブロック機能
-   - 特定のタグやユーザーのイラストをダウンロードしないように
+   - 特定のタグやユーザーのイラストをダウンロードしないようにする
    - settings.tomlにタグ名やユーザーidを書き込む ```[ignore] -> tag = ["<TAG_NAME>"], user = ["<USER_ID>"]```
  - フォルダ分け機能
    - 特定のタグを持つイラストをフォルダごとに分ける
    - settings.tomlにタグ名を書き込む ```[folder] -> tag = ["<TAG_NAME>"]```
  - うごイラ変換機能
-   - うごイラをgifに変換
+   - うごイラをgifに変換する
    - webpやmp4は非対応
  - 通知機能
    - デスクトップ通知やdiscord webhookで通知を送る
    - settings.tomlから設定を行う
+ - リロード
+   - 設定ファイルを再読み込みします
  - OffsetLimitBypass
-   - offsetが5000を超えるとこれ以上取得できなくなるがこれを回避する
+   - offsetの上限をバイパスする
