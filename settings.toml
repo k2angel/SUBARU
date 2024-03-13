@@ -12,6 +12,7 @@ user = []
 
 [ugoira2gif]
 enable = true
+format = "gif"
 
 [notification]
 enable = true
