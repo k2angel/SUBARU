@@ -13,6 +13,7 @@ from collections import deque
 from itertools import count
 from logging import DEBUG, FileHandler, Formatter, getLogger
 
+import webp
 from discord_webhook import DiscordWebhook
 from PIL import Image, UnidentifiedImageError
 from pixivpy3 import AppPixivAPI
@@ -76,7 +77,7 @@ class Client:
             return f"{size} {units[i]}"
 
         def ugoira2gif(ugoira_zip, path, id, delays):
-            gif_path = os.path.join(path, f"{id}_p0 ugoira.gif")
+            output = os.path.join(path, f"{id}_p0 ugoira.{settings['ugoira2gif']['format']}")
             ctime = os.path.getctime(ugoira_zip)
             images = list()
             try:
@@ -90,27 +91,31 @@ class Client:
                 logger.error(f"{type(e)}: {str(e)}")
             else:
                 for delay, file in zip(delays, files):
-                    image = Image.open(os.path.join(ugoira_path, file)).quantize()
+                    image = Image.open(os.path.join(ugoira_path, file))
                     if image.mode != "RGB":
                         image = image.convert("RGB")
                     for _ in range(math.floor(delay / gcd)):
                         images.append(image)
                 else:
-                    try:
-                        images[0].save(
-                            gif_path,
-                            save_all=True,
-                            append_images=images[1:],
-                            optimize=False,
-                            duration=gcd,
-                            loop=0,
-                        )
-                    except AttributeError as e:
-                        logger.error(f"{type(e)}: {str(e)}")
-                    os.utime(gif_path, times=(ctime, ctime))
+                    if os.path.splitext(output)[1] == ".gif":
+                        try:
+                            images[0].save(
+                                output,
+                                save_all=True,
+                                append_images=images[1:],
+                                optimize=False,
+                                duration=gcd,
+                                loop=0,
+                            )
+                        except AttributeError as e:
+                            logger.error(f"{type(e)}: {str(e)}")
+                    elif os.path.splitext(output)[1] == ".webp":
+                        webp.save_images(images, output, fps=(1000 / gcd))
+                    os.utime(output, times=(ctime, ctime))
                     shutil.rmtree(ugoira_path)
-                    logger.debug(f"ugoira2gif: {ugoira_zip} -> {gif_path}")
+                    logger.debug(f"ugoira2gif: {ugoira_zip} -> {output}")
             os.remove(ugoira_zip)
+            return output
 
         if qsize := len(self.queue):
             files_num = 0
@@ -129,15 +134,15 @@ class Client:
                 attachments = data["attachments"]
                 for attachment in tqdm(attachments, desc="Attachments", leave=False):
                     file = os.path.join(path, os.path.basename(attachment))
-                    if os.path.exists(file) or os.path.exists(os.path.join(path, f"{data['id']}_p0 ugoira.gif")):
+                    if os.path.exists(file) or os.path.join(path, f"{id}_p0 ugoira.{settings['ugoira2gif']['format']}"):
                         continue
                     while True:
                         try:
                             self.aapi.download(attachment, path=path)
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 # threading.Thread(target=ugoira2gif, args=(file, path, data["id"], data["delays"])).start()
-                                ugoira2gif(file, path, data["id"], data["delays"])
-                                files_size = files_size + os.path.getsize(os.path.exists(os.path.join(path, f"{data['id']}_p0 ugoira.gif")))
+                                output = ugoira2gif(file, path, data["id"], data["delays"])
+                                files_size = files_size + os.path.getsize(output)
                             else:
                                 Image.open(file)
                                 # logger.debug(attachment)
@@ -292,7 +297,18 @@ class Client:
                                hide_cursor=False)
         if s := re.search(r"(\d+)users", option):
             self.users = int(s.group(1))
-        if s := re.search(r"(\d+)page", option):
+        if s := re.search(r"(\d+):(\d+)?page", option):
+            if s.group(2) is None:
+                self.page = count(int(s.group(1)))
+            else:
+                print(s.groups())
+                if step := int(s.group(1)) // 166:
+                    print(step)
+                    self.page = [166] * step
+                    self.page.extend(range(int(s.group(2)) % 166))
+                else:
+                    self.page = range(int(s.group(1)), int(s.group(2)))
+        elif s := re.search(r"(\d+)page", option):
             self.page = range(int(s.group(1)))
         if "ugoira-not" in option:
             self.ugoira = False
@@ -340,7 +356,10 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    logger.debug(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
+                    if next_qs["offset"] == 5010:
+                        next_qs["start_date"] = illusts[-1]["create_date"]
+                        next_qs["end_date"] = "2007-09-10"
+                        next_qs["offset"] = 0
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -348,21 +367,24 @@ class Client:
                         logger.error(f"{type(e)}: {str(e)}")
                     time.sleep(1)
                 except KeyError as e:
-                    message = data["error"]["message"]
-                    if message == "RateLimit" or message == "Rate Limit":
-                        print_("[!] RateLimit.")
-                        time.sleep(180)
-                    elif message == '{"offset":["offset must be no more than 5000"]}':
-                        next_qs = self.offsetLimitBypass(next_qs)
-                        time.sleep(1)
-                    else:
-                        logger.debug(data)
+                    logger.error(f"{type(e)}: {str(e)}")
+                    try:
+                        message = data["error"]["message"]
+                        if message == "RateLimit" or message == "Rate Limit":
+                            print_("[!] RateLimit.")
+                            time.sleep(180)
+                        elif message == '{"offset":["offset must be no more than 5000"]}':
+                            # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
+                            time.sleep(1)
+                    except KeyError as e:
                         logger.error(f"{type(e)}: {str(e)}")
-                        break
-                except TypeError:
+                        time.sleep(1)
+                except TypeError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
                     break
                 else:
                     if next_qs is None:
+                        logger.debug(f"{type(next_qs)}: {str(next_qs)}")
                         break
                     time.sleep(1)
 
@@ -376,7 +398,10 @@ class Client:
                 for illust in illusts:
                     self.parse(illust)
                 next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.debug(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
+                if next_qs["offset"] == 5010:
+                    next_qs["start_date"] = illusts[-1]["create_date"]
+                    next_qs["end_date"] = "2007-09-10"
+                    next_qs["offset"] = 0
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -384,24 +409,24 @@ class Client:
                     logger.error(f"{type(e)}: {str(e)}")
                 time.sleep(1)
             except KeyError as e:
+                logger.error(f"{type(e)}: {str(e)}")
                 try:
                     message = data["error"]["message"]
                     if message == "RateLimit" or message == "Rate Limit":
                         print_("[!] RateLimit.")
                         time.sleep(180)
                     elif message == '{"offset":["offset must be no more than 5000"]}':
-                        next_qs = self.offsetLimitBypass(next_qs)
+                        # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
                         time.sleep(1)
-                    else:
-                        logger.debug(data)
-                        logger.error(f"{type(e)}: {str(e)}")
-                        break
-                except KeyError:
+                except KeyError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
                     time.sleep(1)
-            except TypeError:
+            except TypeError as e:
+                logger.error(f"{type(e)}: {str(e)}")
                 break
             else:
                 if next_qs is None:
+                    logger.debug(f"{type(next_qs)}: {str(next_qs)}")
                     break
                 time.sleep(1)
         info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
@@ -413,16 +438,18 @@ class Client:
     def search(self, word):
         self.expires_check()
         next_qs = {"word": word}
-        create_date = ""
         for i in self.page:
             data = self.aapi.search_illust(**next_qs)
             try:
                 illusts = data["illusts"]
                 for illust in illusts:
                     self.parse(illust)
-                create_date = illusts[-1]["create_date"]
                 next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.debug(f"offset: {int(next_qs['offset']) - 30}, create_date: {create_date}")
+                logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
+                if next_qs["offset"] == 5010:
+                    next_qs["start_date"] = illusts[-1]["create_date"]
+                    next_qs["end_date"] = "2007-09-10"
+                    next_qs["offset"] = 0
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -430,20 +457,24 @@ class Client:
                     logger.error(f"{type(e)}: {str(e)}")
                 time.sleep(1)
             except KeyError as e:
+                logger.error(f"{type(e)}: {str(e)}")
                 try:
                     message = data["error"]["message"]
                     if message == "RateLimit" or message == "Rate Limit":
                         print_("[!] RateLimit.")
                         time.sleep(180)
                     elif message == '{"offset":["offset must be no more than 5000"]}':
-                        next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
+                        # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
                         time.sleep(1)
-                except KeyError:
+                except KeyError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
                     time.sleep(1)
-            except TypeError:
+            except TypeError as e:
+                logger.error(f"{type(e)}: {str(e)}")
                 break
             else:
                 if next_qs is None:
+                    logger.debug(f"{type(next_qs)}: {str(next_qs)}")
                     break
                 time.sleep(1)
         info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
@@ -462,7 +493,10 @@ class Client:
                 for illust in illusts:
                     self.parse(illust)
                 next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.debug(f"offset: {next_qs['offset'] - 30}, create_date: {self.queue[-1]['create_date']}")
+                if next_qs["offset"] == 5010:
+                    next_qs["start_date"] = illusts[-1]["create_date"]
+                    next_qs["end_date"] = "2007-09-10"
+                    next_qs["offset"] = 0
             except PixivError as e:
                 if "RemoteDisconnected" in str(e):
                     print_("[!] RemoteDisconnected.")
@@ -470,23 +504,25 @@ class Client:
                     logger.error(f"{type(e)}: {str(e)}")
                 time.sleep(1)
             except KeyError as e:
+                logger.error(f"{type(e)}: {str(e)}")
                 try:
                     message = data["error"]["message"]
                     if message == "RateLimit" or message == "Rate Limit":
                         print_("[!] RateLimit.")
                         time.sleep(180)
                     elif message == '{"offset":["offset must be no more than 5000"]}':
-                        next_qs = self.offsetLimitBypass(next_qs)
+                        # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
                         time.sleep(1)
-                    else:
-                        logger.debug(data)
-                        logger.error(f"{type(e)}: {str(e)}")
-                        break
-                except KeyError:
+                except KeyError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
                     time.sleep(1)
-            except TypeError:
+            except TypeError as e:
+                logger.error(f"{type(e)}: {str(e)}")
                 break
             else:
+                if next_qs is None:
+                    logger.debug(f"{type(next_qs)}: {str(next_qs)}")
+                    break
                 time.sleep(1)
 
         info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
