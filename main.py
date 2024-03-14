@@ -306,7 +306,7 @@ class Client:
                         self.page.extend([range(166)] * step_)
                         self.page.append(range(elapsed % 166))
                     else:  # 200:250page -> 50
-                        self.page.append(range(elapsed))
+                        self.page.append(range((end % 166) - elapsed, (end % 166)))
                 else:
                     if step_ := elapsed // 166:  # 100:200page -> 100
                         self.page = [range(start, 166)]
