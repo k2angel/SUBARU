@@ -1,4 +1,5 @@
 import datetime
+import itertools
 import math
 import os
 import pickle
@@ -35,7 +36,7 @@ class Client:
         self.queue = deque()
         self.users = 0
         self.ugoira = None
-        self.page = count()
+        self.page = [count()]
 
     def login(self):
         try:
@@ -140,9 +141,11 @@ class Client:
                         try:
                             self.aapi.download(attachment, path=path)
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
-                                # threading.Thread(target=ugoira2gif, args=(file, path, data["id"], data["delays"])).start()
-                                output = ugoira2gif(file, path, data["id"], data["delays"])
-                                files_size = files_size + os.path.getsize(output)
+                                files_size = files_size + os.path.getsize(file)
+                                threading.Thread(target=ugoira2gif,
+                                                 args=(file, path, data["id"], data["delays"])).start()
+                                # output = ugoira2gif(file, path, data["id"], data["delays"])
+                                # files_size = files_size + os.path.getsize(output)
                             else:
                                 Image.open(file)
                                 # logger.debug(attachment)
@@ -274,42 +277,49 @@ class Client:
                         return ftag
         return True
 
-    def offsetLimitBypass(self, next_qs, start_date=None):
-        print_("[*] OffsetLimitBypass.")
-        if start_date is None:
-            date = datetime.datetime.fromisoformat(self.queue[-1]["create_date"])
-        else:
-            date = datetime.datetime.fromisoformat(start_date)
-        logger.debug(str(date.date()))
-        next_qs["start_date"] = str(date.date())
-        next_qs["end_date"] = "2007-09-10"
-        next_qs["offset"] = 0
-        logger.debug(next_qs)
-        return next_qs
-
     def init_option(self):
         self.users = 0
         self.ugoira = None
-        self.page = count()
+        self.page = [count()]
 
     def option(self):
         option = Write.Input(Center.XCenter("[OPTION] > ", spaces=40), Colors.green_to_black, interval=0,
-                               hide_cursor=False)
+                             hide_cursor=False)
         if s := re.search(r"(\d+)users", option):
             self.users = int(s.group(1))
         if s := re.search(r"(\d+):(\d+)?page", option):
-            if s.group(2) is None:
-                self.page = count(int(s.group(1)))
-            else:
-                print(s.groups())
-                if step := int(s.group(1)) // 166:
-                    print(step)
-                    self.page = [166] * step
-                    self.page.extend(range(int(s.group(2)) % 166))
+            logger.debug(s.groupdict())
+            start = int(s.group(1))
+            if s.group(2) is None:  # 200:page
+                if step := int(s.group(1)) // 166:  # 200:page
+                    self.page = [range(166)] * step
+                    self.page.extend([range(start % 166), count((start % 166) + 1)])
+                else:  # 100:page
+                    self.page = [[start], count(start+1)]
+            else:  # 200:250page
+                end = int(s.group(2))
+                elapsed = end - start
+                logger.debug(elapsed)
+                if step := start // 166:  # 200:250page -> 50
+                    self.page = [[166] * step]
+                    if step_ := elapsed // 166:  # 200:400page -> 200
+                        self.page.extend([range(166)] * step_)
+                        self.page.append(range(elapsed % 166))
+                    else:  # 200:250page -> 50
+                        self.page.append(range(elapsed))
                 else:
-                    self.page = range(int(s.group(1)), int(s.group(2)))
+                    if step_ := elapsed // 166:  # 100:200page -> 100
+                        self.page = [range(start, 166)]
+                        self.page.extend([range(166)] * (step_ - 1))
+                        self.page.append(range(elapsed % 166))
+                    else:  # 100:150page -> 50
+                        self.page = (range(start, end))
         elif s := re.search(r"(\d+)page", option):
-            self.page = range(int(s.group(1)))
+            if step := int(s.group(1)) // 166:  # 200page
+                self.page = [[range(166)] * step]
+                self.page.append(range(int(s.group(1)) % 166))
+            else:  # 100page
+                self.page = [range(int(s.group(1)))]
         if "ugoira-not" in option:
             self.ugoira = False
         elif "ugoira" in option:
@@ -349,17 +359,81 @@ class Client:
             return
         for type in ["illust", "manga"]:
             next_qs = {"user_id": id, "type": type}
-            for i in self.page:
-                data = self.aapi.user_illusts(**next_qs)
+            init_offset = False
+            for i_obj in self.page:
+                logger.debug(i_obj)
+                for i in i_obj:
+                    if not init_offset:
+                        next_qs["offset"] = i * 30
+                    data = self.aapi.user_illusts(**next_qs)
+                    try:
+                        illusts = data["illusts"]
+                        for illust in illusts:
+                            self.parse(illust)
+                        next_qs = self.aapi.parse_qs(data["next_url"])
+                        if next_qs["offset"] == "5010":
+                            next_qs["start_date"] = str(
+                                datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
+                            next_qs["end_date"] = "2007-09-10"
+                            next_qs["offset"] = 0
+                            if type(i_obj) is itertools.count and not init_offset:
+                                logger.debug(f"init_offset: {type(i_obj)}")
+                                init_offset = True
+                            logger.debug(next_qs)
+                    except PixivError as e:
+                        if "RemoteDisconnected" in str(e):
+                            print_("[!] RemoteDisconnected.")
+                        else:
+                            logger.error(f"{type(e)}: {str(e)}")
+                        time.sleep(1)
+                    except KeyError as e:
+                        logger.error(f"{type(e)}: {str(e)}")
+                        try:
+                            message = data["error"]["message"]
+                            if message == "RateLimit" or message == "Rate Limit":
+                                print_("[!] RateLimit.")
+                                time.sleep(180)
+                            elif message == '{"offset":["offset must be no more than 5000"]}':
+                                # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
+                                time.sleep(1)
+                        except KeyError as e:
+                            logger.error(f"{type(e)}: {str(e)}")
+                            time.sleep(1)
+                    except TypeError as e:
+                        logger.error(f"{type(e)}: {str(e)}")
+                        self.init_option()
+                        return
+                    else:
+                        if next_qs is None:
+                            logger.debug(f"{type(next_qs)}: {str(next_qs)}")
+                            self.init_option()
+                            return
+                        time.sleep(1)
+
+
+    def bookmarks(self):
+        self.expires_check()
+        next_qs = {"user_id": self.aapi.user_id}
+        init_offset = False
+        for i_obj in self.page:
+            logger.debug(i_obj)
+            for i in i_obj:
+                if not init_offset:
+                    next_qs["offset"] = i * 30
+                data = self.aapi.user_bookmarks_illust(**next_qs)
                 try:
                     illusts = data["illusts"]
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    if next_qs["offset"] == 5010:
-                        next_qs["start_date"] = illusts[-1]["create_date"]
+                    if next_qs["offset"] == "5010":
+                        next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
                         next_qs["offset"] = 0
+                        if type(i_obj) is itertools.count and not init_offset:
+                            logger.debug(f"init_offset: {type(i_obj)}")
+                            init_offset = True
+                        logger.debug(next_qs)
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -381,155 +455,144 @@ class Client:
                         time.sleep(1)
                 except TypeError as e:
                     logger.error(f"{type(e)}: {str(e)}")
-                    break
+                    info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                    print("")
+                    print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+                    print("")
+                    notification(info)
+                    self.init_option()
+                    return
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                        break
+                        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                        print("")
+                        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+                        print("")
+                        notification(info)
+                        self.init_option()
+                        return
                     time.sleep(1)
 
-    def bookmarks(self):
-        self.expires_check()
-        next_qs = {"user_id": self.aapi.user_id}
-        for i in self.page:
-            data = self.aapi.user_bookmarks_illust(**next_qs)
-            try:
-                illusts = data["illusts"]
-                for illust in illusts:
-                    self.parse(illust)
-                next_qs = self.aapi.parse_qs(data["next_url"])
-                if next_qs["offset"] == 5010:
-                    next_qs["start_date"] = illusts[-1]["create_date"]
-                    next_qs["end_date"] = "2007-09-10"
-                    next_qs["offset"] = 0
-            except PixivError as e:
-                if "RemoteDisconnected" in str(e):
-                    print_("[!] RemoteDisconnected.")
-                else:
-                    logger.error(f"{type(e)}: {str(e)}")
-                time.sleep(1)
-            except KeyError as e:
-                logger.error(f"{type(e)}: {str(e)}")
-                try:
-                    message = data["error"]["message"]
-                    if message == "RateLimit" or message == "Rate Limit":
-                        print_("[!] RateLimit.")
-                        time.sleep(180)
-                    elif message == '{"offset":["offset must be no more than 5000"]}':
-                        # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
-                        time.sleep(1)
-                except KeyError as e:
-                    logger.error(f"{type(e)}: {str(e)}")
-                    time.sleep(1)
-            except TypeError as e:
-                logger.error(f"{type(e)}: {str(e)}")
-                break
-            else:
-                if next_qs is None:
-                    logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                    break
-                time.sleep(1)
-        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
-        print("")
-        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-        print("")
-        notification(info)
 
     def search(self, word):
         self.expires_check()
         next_qs = {"word": word}
-        for i in self.page:
-            data = self.aapi.search_illust(**next_qs)
-            try:
-                illusts = data["illusts"]
-                for illust in illusts:
-                    self.parse(illust)
-                next_qs = self.aapi.parse_qs(data["next_url"])
-                logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
-                if next_qs["offset"] == 5010:
-                    next_qs["start_date"] = illusts[-1]["create_date"]
-                    next_qs["end_date"] = "2007-09-10"
-                    next_qs["offset"] = 0
-            except PixivError as e:
-                if "RemoteDisconnected" in str(e):
-                    print_("[!] RemoteDisconnected.")
-                else:
-                    logger.error(f"{type(e)}: {str(e)}")
-                time.sleep(1)
-            except KeyError as e:
-                logger.error(f"{type(e)}: {str(e)}")
+        init_offset = False
+        for i_obj in self.page:
+            logger.debug(i_obj)
+            for i in i_obj:
+                if not init_offset:
+                    next_qs["offset"] = i * 30
+                data = self.aapi.search_illust(**next_qs)
                 try:
-                    message = data["error"]["message"]
-                    if message == "RateLimit" or message == "Rate Limit":
-                        print_("[!] RateLimit.")
-                        time.sleep(180)
-                    elif message == '{"offset":["offset must be no more than 5000"]}':
-                        # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
-                        time.sleep(1)
+                    illusts = data["illusts"]
+                    for illust in illusts:
+                        self.parse(illust)
+                    next_qs = self.aapi.parse_qs(data["next_url"])
+                    logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
+                    if next_qs["offset"] == "5010":
+                        next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
+                        next_qs["end_date"] = "2007-09-10"
+                        next_qs["offset"] = 0
+                        if type(i_obj) is itertools.count and not init_offset:
+                            logger.debug(f"init_offset: {type(i_obj)}")
+                            init_offset = True
+                        logger.debug(next_qs)
+                except PixivError as e:
+                    if "RemoteDisconnected" in str(e):
+                        print_("[!] RemoteDisconnected.")
+                    else:
+                        logger.error(f"{type(e)}: {str(e)}")
+                    time.sleep(1)
                 except KeyError as e:
                     logger.error(f"{type(e)}: {str(e)}")
+                    try:
+                        message = data["error"]["message"]
+                        if message == "RateLimit" or message == "Rate Limit":
+                            print_("[!] RateLimit.")
+                            time.sleep(180)
+                    except KeyError as e:
+                        logger.error(f"{type(e)}: {str(e)}")
+                        time.sleep(1)
+                except TypeError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
+                    self.init_option()
+                    return
+                else:
+                    if next_qs is None:
+                        logger.debug(f"{type(next_qs)}: {str(next_qs)}")
+                        self.init_option()
+                        return
                     time.sleep(1)
-            except TypeError as e:
-                logger.error(f"{type(e)}: {str(e)}")
-                break
-            else:
-                if next_qs is None:
-                    logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                    break
-                time.sleep(1)
-        info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
-        print("")
-        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-        print("")
-        notification(info)
+        # info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
+        # print("")
+        # print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+        # print("")
+        # notification(info)
 
     def recent(self):
         self.expires_check()
         next_qs = {}
-        for i in self.page:
-            data = self.aapi.illust_new(**next_qs)
-            try:
-                illusts = data["illusts"]
-                for illust in illusts:
-                    self.parse(illust)
-                next_qs = self.aapi.parse_qs(data["next_url"])
-                if next_qs["offset"] == 5010:
-                    next_qs["start_date"] = illusts[-1]["create_date"]
-                    next_qs["end_date"] = "2007-09-10"
-                    next_qs["offset"] = 0
-            except PixivError as e:
-                if "RemoteDisconnected" in str(e):
-                    print_("[!] RemoteDisconnected.")
-                else:
-                    logger.error(f"{type(e)}: {str(e)}")
-                time.sleep(1)
-            except KeyError as e:
-                logger.error(f"{type(e)}: {str(e)}")
+        init_offset = False
+        for i_obj in self.page:
+            logger.debug(i_obj)
+            for i in i_obj:
+                if not init_offset:
+                    next_qs["offset"] = i * 30
+                data = self.aapi.illust_new(**next_qs)
                 try:
-                    message = data["error"]["message"]
-                    if message == "RateLimit" or message == "Rate Limit":
-                        print_("[!] RateLimit.")
-                        time.sleep(180)
-                    elif message == '{"offset":["offset must be no more than 5000"]}':
-                        # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
-                        time.sleep(1)
+                    illusts = data["illusts"]
+                    for illust in illusts:
+                        self.parse(illust)
+                    next_qs = self.aapi.parse_qs(data["next_url"])
+                    if next_qs["offset"] == "5010":
+                        next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
+                        next_qs["end_date"] = "2007-09-10"
+                        next_qs["offset"] = 0
+                        if type(i_obj) is itertools.count and not init_offset:
+                            logger.debug(f"init_offset: {type(i_obj)}")
+                            init_offset = True
+                        logger.debug(next_qs)
+                except PixivError as e:
+                    if "RemoteDisconnected" in str(e):
+                        print_("[!] RemoteDisconnected.")
+                    else:
+                        logger.error(f"{type(e)}: {str(e)}")
+                    time.sleep(1)
                 except KeyError as e:
                     logger.error(f"{type(e)}: {str(e)}")
+                    try:
+                        message = data["error"]["message"]
+                        if message == "RateLimit" or message == "Rate Limit":
+                            print_("[!] RateLimit.")
+                            time.sleep(180)
+                        elif message == '{"offset":["offset must be no more than 5000"]}':
+                            # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
+                            time.sleep(1)
+                    except KeyError as e:
+                        logger.error(f"{type(e)}: {str(e)}")
+                        time.sleep(1)
+                except TypeError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
+                    info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                    print("")
+                    print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+                    print("")
+                    notification(info)
+                    self.init_option()
+                    return
+                else:
+                    if next_qs is None:
+                        logger.debug(f"{type(next_qs)}: {str(next_qs)}")
+                        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                        print("")
+                        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+                        print("")
+                        notification(info)
+                        self.init_option()
+                        return
                     time.sleep(1)
-            except TypeError as e:
-                logger.error(f"{type(e)}: {str(e)}")
-                break
-            else:
-                if next_qs is None:
-                    logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                    break
-                time.sleep(1)
-
-        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
-        print("")
-        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-        print("")
-        notification(info)
 
 
 def notification(message: str):
