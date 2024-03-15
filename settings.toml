@@ -5,6 +5,7 @@ refresh_token = []
 enable = true
 tag = []
 user = []
+vague = []
 
 [ignore]
 enable = true

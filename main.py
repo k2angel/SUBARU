@@ -126,7 +126,6 @@ class Client:
                 os.remove(ugoira_zip)
             except PermissionError as e:
                 logger.error(f"{type(e)}: {str(e)}")
-            return output
 
         if qsize := len(self.queue):
             files_num = 0
@@ -160,13 +159,13 @@ class Client:
                             self.aapi.download(attachment, path=path)
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 files_size = files_size + os.path.getsize(file)
-                                threading.Thread(target=ugoira2gif,
-                                                 args=(file, path, post_id, data["delays"])).start()
-                                # output = ugoira2gif(file, path, data["id"], data["delays"])
-                                # files_size = files_size + os.path.getsize(output)
+                                if qsize != 1:
+                                    threading.Thread(target=ugoira2gif,
+                                                     args=(file, path, post_id, data["delays"])).start()
+                                else:
+                                    ugoira2gif(file, path, data["id"], data["delays"])
                             else:
                                 Image.open(file)
-                                # logger.debug(attachment)
                                 files_size = files_size + os.path.getsize(file)
                                 time.sleep(1)
                             files_num = files_num + 1
@@ -218,6 +217,13 @@ class Client:
             "is_followed": illust["user"]["is_followed"]
         }
         tags = [re.sub(r"\d+users", "", tag["name"]) for tag in illust["tags"]]
+        for i in range(len(tags)):
+            tag = tags[i]
+            for vague in settings["folder"]["vague"]:
+                if tag in vague["vague"]:
+                    logger.debug(f"{vague['vague']} -> {vague['tag']}")
+                    tags[i] = tag.replace(tag, vague["tag"])
+        logger.debug(tags)
         total_bookmarks = illust["total_bookmarks"]
         is_bookmarked = illust["is_bookmarked"]
         is_muted = illust["is_muted"]

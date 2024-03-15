@@ -26,6 +26,10 @@
  - フォルダ分け機能
    - 特定のタグやユーザーのイラストをフォルダごとに分けるようにする
    - settings.tomlにタグ名かユーザーIDを書き込む ```[folder] -> tag = ["<TAG_NAME>"], user = [<USER_ID>]```
+   - 曖昧タグ機能
+     - 同じ意味合いの別名のタグを同じタグとして扱うようにする
+     - settings.tomlにタグ名を書き込む ```[folder] -> vague = [{tag = "<TAG_NAME>", vague = ["<VAGUE_TAG_NANE>"]}]```
+     - 例 ![](https://cdn.discordapp.com/attachments/1111172092654796813/1218064910009765918/image.png?ex=66064e59&is=65f3d959&hm=feb72dc0b9cda560c89b24fa0c25ad02ca55c10e0263ebe7d6b08b121d40c3fb&)
  - うごイラ変換機能
    - settings.tomlにフォーマット名を書き込む ```[ugoira2gif] -> format = "<FORMAT>"```
    - 対応形式
