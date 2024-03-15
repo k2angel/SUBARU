@@ -1,9 +1,9 @@
 import datetime
 import itertools
+import json
 import math
 import os
 import pickle
-import pprint
 import re
 import shutil
 import threading
@@ -37,6 +37,13 @@ class Client:
         self.users = 0
         self.ugoira = None
         self.page = [count()]
+        if not os.path.exists("./stalker.json"):
+            self.stalker = {}
+            with open("./stalker.json", "w", encoding="utf-8") as f:
+                json.dump(self.stalker, f, indent=4, ensure_ascii=False)
+        else:
+            with open("./stalker.json", "r", encoding="utf-8") as f:
+                self.stalker = json.load(f)
 
     def login(self):
         try:
@@ -92,7 +99,7 @@ class Client:
                 logger.error(f"{type(e)}: {str(e)}")
             else:
                 for delay, file in zip(delays, files):
-                    image = Image.open(os.path.join(ugoira_path, file))
+                    image = Image.open(os.path.join(ugoira_path, file)).quantize()
                     if image.mode != "RGB":
                         image = image.convert("RGB")
                     for _ in range(math.floor(delay / gcd)):
@@ -115,7 +122,10 @@ class Client:
                     os.utime(output, times=(ctime, ctime))
                     shutil.rmtree(ugoira_path)
                     logger.debug(f"ugoira2gif: {ugoira_zip} -> {output}")
-            os.remove(ugoira_zip)
+            try:
+                os.remove(ugoira_zip)
+            except PermissionError as e:
+                logger.error(f"{type(e)}: {str(e)}")
             return output
 
         if qsize := len(self.queue):
@@ -126,6 +136,7 @@ class Client:
             start = time.time()
             if qsize != 1:
                 qbar = tqdm(total=qsize, desc="Queue", leave=False)
+                logger.debug(f"qsize: {qsize}")
             for i in range(qsize):
                 data = self.queue.popleft()
                 path = str(os.path.join(settings["directory"], data["folder"]))
@@ -135,15 +146,22 @@ class Client:
                 attachments = data["attachments"]
                 for attachment in tqdm(attachments, desc="Attachments", leave=False):
                     file = os.path.join(path, os.path.basename(attachment))
-                    if os.path.exists(file) or os.path.join(path, f"{id}_p0 ugoira.{settings['ugoira2gif']['format']}"):
+                    if os.path.exists(file):
+                        logger.debug(f"exists file: {file}")
                         continue
+                    elif (data["type"] == "ugoira" and
+                          os.path.exists(os.path.join(path, f"{post_id}_p0 ugoira.{settings['ugoira2gif']['format']}"))):
+                        logger.debug(f"exists file: {post_id}_p0 ugoira.{settings['ugoira2gif']['format']}")
+                        continue
+                    else:
+                        logger.debug(file)
                     while True:
                         try:
                             self.aapi.download(attachment, path=path)
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 files_size = files_size + os.path.getsize(file)
                                 threading.Thread(target=ugoira2gif,
-                                                 args=(file, path, data["id"], data["delays"])).start()
+                                                 args=(file, path, post_id, data["delays"])).start()
                                 # output = ugoira2gif(file, path, data["id"], data["delays"])
                                 # files_size = files_size + os.path.getsize(output)
                             else:
@@ -236,7 +254,6 @@ class Client:
                                 print_("[!] RateLimit.")
                                 time.sleep(180)
                             else:
-                                print(ugoira_data)
                                 logger.error(f"{type(e)}: {str(e)}")
                                 time.sleep(1)
                                 break
@@ -270,12 +287,35 @@ class Client:
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
         if settings["folder"]["enable"]:
+            if user["id"] in settings["folder"]["user"]:
+                for fuser in settings["folder"]["user"]:
+                    if fuser == user["id"]:
+                        path = user["name"].translate(str.maketrans(
+                            {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
+                             '<': '＜', '>': '＞', '|': '｜'}))
+                        return self.stalker_check(str(user["id"]), path)
             if not set(tags).isdisjoint(settings["folder"]["tag"]):
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
                         # logger.debug(ftag)
                         return ftag
         return True
+
+    def stalker_check(self, uuid: str, path: str):
+        try:
+            if self.stalker[uuid] == path:
+                return path
+            else:
+                old_path = self.stalker[uuid]
+                self.stalker[uuid] = path
+                with open("./stalker.json", "w", encoding="utf-8") as f:
+                    json.dump(self.stalker, f, indent=4, ensure_ascii=False)
+                return old_path
+        except KeyError:
+            self.stalker[uuid] = path
+            with open("./stalker.json", "w", encoding="utf-8") as f:
+                json.dump(self.stalker, f, indent=4, ensure_ascii=False)
+            return path
 
     def init_option(self):
         self.users = 0
@@ -285,41 +325,49 @@ class Client:
     def option(self):
         option = Write.Input(Center.XCenter("[OPTION] > ", spaces=40), Colors.green_to_black, interval=0,
                              hide_cursor=False)
+        logger.debug(option)
         if s := re.search(r"(\d+)users", option):
             self.users = int(s.group(1))
         if s := re.search(r"(\d+):(\d+)?page", option):
-            logger.debug(s.groupdict())
             start = int(s.group(1))
             if s.group(2) is None:  # 200:page
                 if step := int(s.group(1)) // 166:  # 200:page
-                    self.page = [range(166)] * step
-                    self.page.extend([range(start % 166), count((start % 166) + 1)])
+                    page = [[166] * step, range(start % 166), count((start % 166) + 1)]
                 else:  # 100:page
-                    self.page = [[start], count(start+1)]
+                    page = [[start], count(start + 1)]
             else:  # 200:250page
                 end = int(s.group(2))
                 elapsed = end - start
-                logger.debug(elapsed)
                 if step := start // 166:  # 200:250page -> 50
-                    self.page = [[166] * step]
-                    if step_ := elapsed // 166:  # 200:400page -> 200
-                        self.page.extend([range(166)] * step_)
-                        self.page.append(range(elapsed % 166))
+                    start_ = start - 166 * step
+                    if step != end // 166:  # 200:400page -> 200
+                        # print(0)
+                        page = [[166] * step, range(start_, 166)]
+                        elapsed = elapsed - 166 + start_
+                        for i in range(elapsed // 166):
+                            page.append(range(166))
+                        page.append(range(end % 166))
                     else:  # 200:250page -> 50
-                        self.page.append(range((end % 166) - elapsed, (end % 166)))
-                else:
-                    if step_ := elapsed // 166:  # 100:200page -> 100
-                        self.page = [range(start, 166)]
-                        self.page.extend([range(166)] * (step_ - 1))
-                        self.page.append(range(elapsed % 166))
-                    else:  # 100:150page -> 50
-                        self.page = (range(start, end))
+                        # print(1)
+                        page = [[166] * step, range(start_, end % 166)]
+                elif elapsed // 166:  # 100:300page -> 200
+                    # print(3)
+                    page = [range(start, 166)]
+                    elapsed = elapsed - (166 - start)
+                    for i in range(elapsed // 166):
+                        page.append(range(166))
+                    page.append(range(elapsed % 166))
+                else:  # 100:150page -> 50
+                    # print(4)
+                    page = [range(start, end)]
+            self.page = page
         elif s := re.search(r"(\d+)page", option):
-            if step := int(s.group(1)) // 166:  # 200page
-                self.page = [[range(166)] * step]
-                self.page.append(range(int(s.group(1)) % 166))
+            start = int(s.group(1))
+            if step := start // 166:  # 200page
+                self.page = [range(166)] * step
+                self.page.append(range(start % 166))
             else:  # 100page
-                self.page = [range(int(s.group(1)))]
+                self.page = [range(start)]
         if "ugoira-not" in option:
             self.ugoira = False
         elif "ugoira" in option:
@@ -349,7 +397,8 @@ class Client:
         self.expires_check()
         user_info = self.aapi.user_detail(id)
         try:
-            info = f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\nILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}"
+            info = (f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\n"
+                    f"ILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}")
             print("")
             print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
             print("")
@@ -357,8 +406,8 @@ class Client:
         except KeyError:
             print(user_info)
             return
-        for type in ["illust", "manga"]:
-            next_qs = {"user_id": id, "type": type}
+        for type_ in ["illust", "manga"]:
+            next_qs = {"user_id": id, "type": type_}
             init_offset = False
             for i_obj in self.page:
                 logger.debug(i_obj)
@@ -371,6 +420,7 @@ class Client:
                         for illust in illusts:
                             self.parse(illust)
                         next_qs = self.aapi.parse_qs(data["next_url"])
+                        logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
                         if next_qs["offset"] == "5010":
                             next_qs["start_date"] = str(
                                 datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
@@ -380,6 +430,8 @@ class Client:
                                 logger.debug(f"init_offset: {type(i_obj)}")
                                 init_offset = True
                             logger.debug(next_qs)
+                        if len(illusts) != 30:
+                            logger.debug(len(illusts))
                     except PixivError as e:
                         if "RemoteDisconnected" in str(e):
                             print_("[!] RemoteDisconnected.")
@@ -401,15 +453,12 @@ class Client:
                             time.sleep(1)
                     except TypeError as e:
                         logger.error(f"{type(e)}: {str(e)}")
-                        self.init_option()
                         return
                     else:
                         if next_qs is None:
                             logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                            self.init_option()
                             return
                         time.sleep(1)
-
 
     def bookmarks(self):
         self.expires_check()
@@ -426,6 +475,7 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
+                    logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
                     if next_qs["offset"] == "5010":
                         next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
@@ -434,6 +484,8 @@ class Client:
                             logger.debug(f"init_offset: {type(i_obj)}")
                             init_offset = True
                         logger.debug(next_qs)
+                    if len(illusts) != 30:
+                        logger.debug(len(illusts))
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -460,7 +512,6 @@ class Client:
                     print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                     print("")
                     notification(info)
-                    self.init_option()
                     return
                 else:
                     if next_qs is None:
@@ -470,10 +521,8 @@ class Client:
                         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                         print("")
                         notification(info)
-                        self.init_option()
                         return
                     time.sleep(1)
-
 
     def search(self, word):
         self.expires_check()
@@ -499,6 +548,8 @@ class Client:
                             logger.debug(f"init_offset: {type(i_obj)}")
                             init_offset = True
                         logger.debug(next_qs)
+                    if len(illusts) != 30:
+                        logger.debug(len(illusts))
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -517,12 +568,10 @@ class Client:
                         time.sleep(1)
                 except TypeError as e:
                     logger.error(f"{type(e)}: {str(e)}")
-                    self.init_option()
                     return
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                        self.init_option()
                         return
                     time.sleep(1)
         # info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
@@ -546,6 +595,7 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
+                    logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
                     if next_qs["offset"] == "5010":
                         next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
@@ -554,6 +604,8 @@ class Client:
                             logger.debug(f"init_offset: {type(i_obj)}")
                             init_offset = True
                         logger.debug(next_qs)
+                    if len(illusts) != 30:
+                        logger.debug(len(illusts))
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -580,7 +632,6 @@ class Client:
                     print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                     print("")
                     notification(info)
-                    self.init_option()
                     return
                 else:
                     if next_qs is None:
@@ -590,7 +641,6 @@ class Client:
                         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                         print("")
                         notification(info)
-                        self.init_option()
                         return
                     time.sleep(1)
 
@@ -690,6 +740,7 @@ if __name__ == "__main__":
         if mode == "d":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print("")
             urls = input_("[URL] > ").split()
             for url in urls:
                 if m := re.match(r"https://(www\.)?pixiv\.net/(users|artworks)/(\d+)", url):
