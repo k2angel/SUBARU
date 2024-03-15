@@ -22,10 +22,10 @@
    - ``ugoira-not`` -> うごイラ以外をダウンロードする
  - ブロック機能
    - 特定のタグやユーザーのイラストをダウンロードしないようにする
-   - settings.tomlにタグ名やユーザーidを書き込む ```[ignore] -> tag = ["<TAG_NAME>"], user = ["<USER_ID>"]```
+   - settings.tomlにタグ名かユーザーIDを書き込む ```[ignore] -> tag = ["<TAG_NAME>"], user = [<USER_ID>]```
  - フォルダ分け機能
-   - 特定のタグを持つイラストをフォルダごとに分けるようにする
-   - settings.tomlにタグ名を書き込む ```[folder] -> tag = ["<TAG_NAME>"]```
+   - 特定のタグやユーザーのイラストをフォルダごとに分けるようにする
+   - settings.tomlにタグ名かユーザーIDを書き込む ```[folder] -> tag = ["<TAG_NAME>"], user = [<USER_ID>]```
  - うごイラ変換機能
    - settings.tomlにフォーマット名を書き込む ```[ugoira2gif] -> format = "<FORMAT>"```
    - 対応形式

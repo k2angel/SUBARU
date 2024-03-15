@@ -4,6 +4,7 @@ refresh_token = []
 [folder]
 enable = true
 tag = []
+user = []
 
 [ignore]
 enable = true
