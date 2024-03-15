@@ -221,9 +221,8 @@ class Client:
             tag = tags[i]
             for vague in settings["folder"]["vague"]:
                 if tag in vague["vague"]:
-                    logger.debug(f"{vague['vague']} -> {vague['tag']}")
+                    logger.debug(f"{tag} -> {vague['tag']}")
                     tags[i] = tag.replace(tag, vague["tag"])
-        logger.debug(tags)
         total_bookmarks = illust["total_bookmarks"]
         is_bookmarked = illust["is_bookmarked"]
         is_muted = illust["is_muted"]
