@@ -9,6 +9,7 @@ vague = []
 
 [ignore]
 enable = true
+ai_illust = false
 tag = []
 user = []
 

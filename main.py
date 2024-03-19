@@ -1,4 +1,5 @@
 import datetime
+import html
 import itertools
 import json
 import math
@@ -6,6 +7,7 @@ import os
 import pickle
 import re
 import shutil
+import subprocess
 import threading
 import time
 import tomllib
@@ -227,7 +229,8 @@ class Client:
         is_bookmarked = illust["is_bookmarked"]
         is_muted = illust["is_muted"]
         illust_type = illust["type"]
-        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type):
+        illust_ai_type = illust["illust_ai_type"]
+        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type):
             if type(result) is str:
                 folder = result
             else:
@@ -276,11 +279,13 @@ class Client:
             self.queue.append(data)
 
     def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool,
-              illust_type: bool):
+              illust_type: bool, illust_ai_type: int):
         if settings["ignore"]["enable"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
                 # logger.debug("ignore")
+                return False
+            if illust_ai_type == 2:
                 return False
         if self.users > total_bookmarks:
             # logger.debug(f"{self.users} > {total_bookmarks}")
@@ -298,7 +303,7 @@ class Client:
                         path = user["name"].translate(str.maketrans(
                             {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
                              '<': '＜', '>': '＞', '|': '｜'}))
-                        return self.stalker_check(str(user["id"]), path)
+                        return f"{self.stalker_check(str(user['id']), path)}[{user['id']}]"
             if not set(tags).isdisjoint(settings["folder"]["tag"]):
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
@@ -312,10 +317,14 @@ class Client:
                 return path
             else:
                 old_path = self.stalker[uuid]
+                try:
+                    os.rename(os.path.join(settings["directory"], old_path), os.path.join(settings["directory"], path))
+                except (FileNotFoundError, FileExistsError) as e:
+                    logger.error(f"{type(e)}: {str(e)}")
                 self.stalker[uuid] = path
                 with open("./stalker.json", "w", encoding="utf-8") as f:
                     json.dump(self.stalker, f, indent=4, ensure_ascii=False)
-                return old_path
+                return path
         except KeyError:
             self.stalker[uuid] = path
             with open("./stalker.json", "w", encoding="utf-8") as f:
@@ -337,7 +346,7 @@ class Client:
             start = int(s.group(1))
             if s.group(2) is None:  # 200:page
                 if step := int(s.group(1)) // 166:  # 200:page
-                    page = [[166] * step, range(start % 166), count((start % 166) + 1)]
+                    page = [[166] * step, count((start % 166) + 1)]
                 else:  # 100:page
                     page = [[start], count(start + 1)]
             else:  # 200:250page
@@ -400,17 +409,23 @@ class Client:
 
     def user(self, id):
         self.expires_check()
-        user_info = self.aapi.user_detail(id)
-        try:
-            info = (f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\n"
-                    f"ILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}")
-            print("")
-            print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-            print("")
-            notification(info)
-        except KeyError:
-            print(user_info)
-            return
+        while True:
+            try:
+                user_info = self.aapi.user_detail(id)
+                info = (f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\n"
+                        f"ILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}")
+                print("")
+                print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+                print("")
+                notification(info)
+            except PixivError as e:
+                logger.error(f"{type(e)}: {str(e)}")
+                time.sleep(1)
+            except KeyError as e:
+                logger.error(f"{type(e)}: {str(e)}")
+                return
+            else:
+                break
         for type_ in ["illust", "manga"]:
             next_qs = {"user_id": id, "type": type_}
             init_offset = False
@@ -435,8 +450,6 @@ class Client:
                                 logger.debug(f"init_offset: {type(i_obj)}")
                                 init_offset = True
                             logger.debug(next_qs)
-                        if len(illusts) != 30:
-                            logger.debug(len(illusts))
                     except PixivError as e:
                         if "RemoteDisconnected" in str(e):
                             print_("[!] RemoteDisconnected.")
@@ -489,8 +502,6 @@ class Client:
                             logger.debug(f"init_offset: {type(i_obj)}")
                             init_offset = True
                         logger.debug(next_qs)
-                    if len(illusts) != 30:
-                        logger.debug(len(illusts))
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -531,6 +542,8 @@ class Client:
 
     def search(self, word):
         self.expires_check()
+        if settings["ignore"]["enable"]:
+            word = f"{word} -{' -'.join(settings['ignore']['tag'])}"
         next_qs = {"word": word}
         init_offset = False
         for i_obj in self.page:
@@ -553,8 +566,6 @@ class Client:
                             logger.debug(f"init_offset: {type(i_obj)}")
                             init_offset = True
                         logger.debug(next_qs)
-                    if len(illusts) != 30:
-                        logger.debug(len(illusts))
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -609,8 +620,6 @@ class Client:
                             logger.debug(f"init_offset: {type(i_obj)}")
                             init_offset = True
                         logger.debug(next_qs)
-                    if len(illusts) != 30:
-                        logger.debug(len(illusts))
                 except PixivError as e:
                     if "RemoteDisconnected" in str(e):
                         print_("[!] RemoteDisconnected.")
@@ -649,6 +658,25 @@ class Client:
                         return
                     time.sleep(1)
 
+    def novel(self, id):
+        # 小説内容
+        data = self.aapi.novel_detail(id)
+        novel = data["novel"]
+        user_name = novel["user"]["name"]
+        title = novel["title"]
+        caption = html.unescape(novel["caption"])
+        # HTML改行タグを変換
+        if "<br />" in caption:
+            caption = caption.replace("<br />", "\n")
+        novel_url = "https://pixiv.net/novel/show.php?id=%s" % novel["id"]
+        image_url = novel["image_urls"]["large"]
+        # 表紙をダウンロード
+        # aapi.download()
+        # 小説本文
+        json_result = self.aapi.novel_text(id)
+        text = json_result["novel_text"]
+        data = [title, user_name, caption, novel_url, image_url, text]
+
 
 def notification(message: str):
     def desktop(message: str):
@@ -683,16 +711,6 @@ def load_settings():
     return settings
 
 
-def login():
-    from pixiv_auth import login
-    refresh_token = login()
-    if refresh_token not in settings["refresh_token"]:
-        settings["refresh_token"].append(refresh_token)
-        with open("settings.toml", "wb") as f:
-            dump(settings, f)
-        return refresh_token
-
-
 def make_logger(name):
     logger = getLogger(name)
     logger.setLevel(DEBUG)
@@ -720,7 +738,7 @@ menu = """
 [r] Recent    [l] Login      [R] Reload
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-version = "1.0"
+version = "1.4"
 System.Title(f"SUBARU v{version}")
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -731,7 +749,12 @@ try:
 except IndexError as e:
     logger.error(f"{type(e)}: {str(e)}")
     print_("[!] refresh token is nothing.")
+    from pixiv_auth import login
     refresh_token = login()
+    if refresh_token not in settings["refresh_token"]:
+        settings["refresh_token"].append(refresh_token)
+        with open("settings.toml", "wb") as f:
+            dump(settings, f)
     client = Client(refresh_token)
 
 console = Console()
