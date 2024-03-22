@@ -1,3 +1,4 @@
+import copy
 import datetime
 import html
 import itertools
@@ -56,10 +57,10 @@ class Client:
                 print_("[!] Authentication error!: RemoteDisconnected.")
             elif "refresh_token is set" in str(e):
                 print_("[!] Authentication error!: refresh token is nothing.")
-                exit()
+                input()
             elif "check refresh_token" in str(e):
                 print_("[!] Authentication error!: Invalid refresh token.")
-                exit()
+                input()
             else:
                 print_("[!] Authentication error!")
         except Exception as e:
@@ -161,7 +162,7 @@ class Client:
                             self.aapi.download(attachment, path=path)
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 files_size = files_size + os.path.getsize(file)
-                                if qsize != 1:
+                                if settings["ugoira2gif"]["thread"]:
                                     threading.Thread(target=ugoira2gif,
                                                      args=(file, path, post_id, data["delays"])).start()
                                 else:
@@ -285,7 +286,7 @@ class Client:
                     settings["ignore"]["tag"]) or is_muted:
                 # logger.debug("ignore")
                 return False
-            if illust_ai_type == 2:
+            if settings["ignore"]["ai_illust"] and illust_ai_type == 2:
                 return False
         if self.users > total_bookmarks:
             # logger.debug(f"{self.users} > {total_bookmarks}")
@@ -429,7 +430,9 @@ class Client:
         for type_ in ["illust", "manga"]:
             next_qs = {"user_id": id, "type": type_}
             init_offset = False
-            for i_obj in self.page:
+            page = copy.deepcopy(self.page)
+            logger.debug(f"{type_}: {page}")
+            for i_obj in page:
                 logger.debug(i_obj)
                 for i in i_obj:
                     if not init_offset:
@@ -471,11 +474,11 @@ class Client:
                             time.sleep(1)
                     except TypeError as e:
                         logger.error(f"{type(e)}: {str(e)}")
-                        return
+                        break
                     else:
                         if next_qs is None:
                             logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                            return
+                            break
                         time.sleep(1)
 
     def bookmarks(self):
@@ -528,7 +531,7 @@ class Client:
                     print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                     print("")
                     notification(info)
-                    return
+                    break
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
@@ -537,7 +540,7 @@ class Client:
                         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                         print("")
                         notification(info)
-                        return
+                        break
                     time.sleep(1)
 
     def search(self, word):
@@ -584,11 +587,11 @@ class Client:
                         time.sleep(1)
                 except TypeError as e:
                     logger.error(f"{type(e)}: {str(e)}")
-                    return
+                    break
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                        return
+                        break
                     time.sleep(1)
         # info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
         # print("")
@@ -646,7 +649,7 @@ class Client:
                     print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                     print("")
                     notification(info)
-                    return
+                    break
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
@@ -655,7 +658,7 @@ class Client:
                         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                         print("")
                         notification(info)
-                        return
+                        break
                     time.sleep(1)
 
     def novel(self, id):
