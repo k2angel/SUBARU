@@ -15,6 +15,7 @@ user = []
 
 [ugoira2gif]
 enable = true
+thread = true
 format = "gif"
 
 [notification]
