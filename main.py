@@ -40,6 +40,7 @@ class Client:
         self.users = 0
         self.ugoira = None
         self.page = [count()]
+        self.reporter_run = settings["notification"]["report"]["enable"]
         if not os.path.exists("./stalker.json"):
             self.stalker = {}
             with open("./stalker.json", "w", encoding="utf-8") as f:
@@ -49,35 +50,49 @@ class Client:
                 self.stalker = json.load(f)
 
     def login(self):
-        try:
-            auth_data = self.aapi.auth(refresh_token=self.refresh_token)
-        except PixivError as e:
-            logger.error(f"{type(e)}: {str(e)}")
-            if "RemoteDisconnected" in str(e):
-                print_("[!] Authentication error!: RemoteDisconnected.")
-            elif "refresh_token is set" in str(e):
-                print_("[!] Authentication error!: refresh token is nothing.")
-                input()
-            elif "check refresh_token" in str(e):
-                print_("[!] Authentication error!: Invalid refresh token.")
-                input()
+        while True:
+            try:
+                auth_data = self.aapi.auth(refresh_token=self.refresh_token)
+            except PixivError as e:
+                logger.error(f"{type(e)}: {str(e)}")
+                if "RemoteDisconnected" in str(e):
+                    print_("[!] Authentication error!: RemoteDisconnected.")
+                elif "refresh_token is set" in str(e):
+                    print_("[!] Authentication error!: refresh token is nothing.")
+                    input()
+                    exit()
+                elif "check refresh_token" in str(e):
+                    print_("[!] Authentication error!: Invalid refresh token.")
+                    input()
+                    exit()
+                else:
+                    print_("[!] Authentication error!")
+            except Exception as e:
+                logger.error(f"{type(e)}: {str(e)}")
+                exit()
             else:
-                print_("[!] Authentication error!")
-        except Exception as e:
-            logger.error(f"{type(e)}: {str(e)}")
-            exit()
-        else:
-            print_("[*] Login successfully!")
-            logger.debug(auth_data)
-            return time.time(), auth_data["expires_in"]
+                print_("[*] Login successfully!")
+                logger.debug(auth_data)
+                return time.time(), auth_data["expires_in"]
 
     def expires_check(self):
         elapsed_time = time.time() - self.access_token_get
         if elapsed_time >= self.expires_in:
             print_("[!] Expires in access token!")
-            auth_data = self.aapi.auth(refresh_token=self.refresh_token)
-            logger.debug(auth_data)
             self.access_token_get, self.expires_in = self.login()
+
+    def reporter(self):
+        logger.debug("reporter started...")
+        while self.reporter_run:
+            for i in range(settings["notification"]["report"]["interval"] * 60):
+                if not self.reporter_run:
+                    break
+                time.sleep(1)
+            if not self.reporter_run:
+                break
+            info = f"LEFTOVER QUEUE: {len(self.queue)}"
+            notification(info)
+        logger.debug("reporter stopped...")
 
     def download(self):
         def convert_size(size):
@@ -139,6 +154,9 @@ class Client:
             if qsize != 1:
                 qbar = tqdm(total=qsize, desc="Queue", leave=False)
                 logger.debug(f"qsize: {qsize}")
+                if self.reporter_run:
+                    reporter_t = threading.Thread(target=self.reporter)
+                    reporter_t.start()
             for i in range(qsize):
                 data = self.queue.popleft()
                 path = str(os.path.join(settings["directory"], data["folder"]))
@@ -155,8 +173,6 @@ class Client:
                           os.path.exists(os.path.join(path, f"{post_id}_p0 ugoira.{settings['ugoira2gif']['format']}"))):
                         logger.debug(f"exists file: {post_id}_p0 ugoira.{settings['ugoira2gif']['format']}")
                         continue
-                    else:
-                        logger.debug(file)
                     while True:
                         try:
                             self.aapi.download(attachment, path=path)
@@ -172,6 +188,7 @@ class Client:
                                 files_size = files_size + os.path.getsize(file)
                                 time.sleep(1)
                             files_num = files_num + 1
+                            logger.debug(f"downloaded: {file}")
                             break
                         except (ProtocolError, UnidentifiedImageError, ChunkedEncodingError, ConnectionError,
                                 PixivError) as e:
@@ -203,6 +220,13 @@ class Client:
                     qbar.update()
             if "qbar" in locals():
                 qbar.close()
+            if "reporter_t" in locals():
+                self.reporter_run = False
+                reporter_t.join()
+                self.reporter_run = settings["notification"]["report"]["enable"]
+            self.users = 0
+            self.ugoira = None
+            self.page = [count()]
             elapsed = time.time() - start
             info = f"TIME: {datetime.timedelta(seconds=elapsed)}\nFILES: {files_num}\nSIZE: {convert_size(files_size)}"
             print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
@@ -292,12 +316,19 @@ class Client:
             # logger.debug(f"{self.users} > {total_bookmarks}")
             return False
         if self.ugoira and not illust_type == "ugoira":
+            logger.debug(f"{self.ugoira} == {illust_type}")
             return False
         elif self.ugoira is False and illust_type != "ugoira":
+            logger.debug(f"{self.ugoira} == {illust_type}")
             return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
         if settings["folder"]["enable"]:
+            if settings["folder"]["follow_user"] and user["is_followed"]:
+                path = user["name"].translate(str.maketrans(
+                    {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
+                     '<': '＜', '>': '＞', '|': '｜'}))
+                return f"{self.stalker_check(str(user['id']), path)}[{user['id']}]"
             if user["id"] in settings["folder"]["user"]:
                 for fuser in settings["folder"]["user"]:
                     if fuser == user["id"]:
@@ -331,11 +362,6 @@ class Client:
             with open("./stalker.json", "w", encoding="utf-8") as f:
                 json.dump(self.stalker, f, indent=4, ensure_ascii=False)
             return path
-
-    def init_option(self):
-        self.users = 0
-        self.ugoira = None
-        self.page = [count()]
 
     def option(self):
         option = Write.Input(Center.XCenter("[OPTION] > ", spaces=40), Colors.green_to_black, interval=0,
@@ -424,6 +450,7 @@ class Client:
                 time.sleep(1)
             except KeyError as e:
                 logger.error(f"{type(e)}: {str(e)}")
+                logger.error(user_info)
                 return
             else:
                 break
@@ -461,6 +488,7 @@ class Client:
                         time.sleep(1)
                     except KeyError as e:
                         logger.error(f"{type(e)}: {str(e)}")
+                        logger.error(data)
                         try:
                             message = data["error"]["message"]
                             if message == "RateLimit" or message == "Rate Limit":
@@ -513,6 +541,7 @@ class Client:
                     time.sleep(1)
                 except KeyError as e:
                     logger.error(f"{type(e)}: {str(e)}")
+                    logger.error(data)
                     try:
                         message = data["error"]["message"]
                         if message == "RateLimit" or message == "Rate Limit":
@@ -545,12 +574,11 @@ class Client:
 
     def search(self, word):
         self.expires_check()
-        if settings["ignore"]["enable"]:
-            word = f"{word} -{' -'.join(settings['ignore']['tag'])}"
         next_qs = {"word": word}
         init_offset = False
         for i_obj in self.page:
             logger.debug(i_obj)
+            logger.debug(next_qs)
             for i in i_obj:
                 if not init_offset:
                     next_qs["offset"] = i * 30
@@ -577,6 +605,7 @@ class Client:
                     time.sleep(1)
                 except KeyError as e:
                     logger.error(f"{type(e)}: {str(e)}")
+                    logger.error(data)
                     try:
                         message = data["error"]["message"]
                         if message == "RateLimit" or message == "Rate Limit":
@@ -631,6 +660,7 @@ class Client:
                     time.sleep(1)
                 except KeyError as e:
                     logger.error(f"{type(e)}: {str(e)}")
+                    logger.error(data)
                     try:
                         message = data["error"]["message"]
                         if message == "RateLimit" or message == "Rate Limit":
@@ -741,8 +771,8 @@ menu = """
 [r] Recent    [l] Login      [R] Reload
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-version = "1.4"
-System.Title(f"SUBARU v{version}")
+__version__ = "1.6"
+System.Title(f"SUBARU v{__version__}")
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 logger = make_logger(__name__)
@@ -821,5 +851,4 @@ if __name__ == "__main__":
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
             print("")
             settings = load_settings()
-        client.init_option()
         input_("[*] Press ENTER to go back.")
