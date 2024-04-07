@@ -103,6 +103,9 @@ class Client:
             return f"{size} {units[i]}"
 
         def ugoira2gif(ugoira_zip, path, id, delays):
+            format = settings['ugoira2gif']['format']
+            if format == "gif" or format == "webp" or format == "png":
+                return
             output = os.path.join(path, f"{id}_p0 ugoira.{settings['ugoira2gif']['format']}")
             ctime = os.path.getctime(ugoira_zip)
             images = list()
@@ -123,7 +126,7 @@ class Client:
                     for _ in range(math.floor(delay / gcd)):
                         images.append(image)
                 else:
-                    if os.path.splitext(output)[1] == ".gif":
+                    if format == "gif" or format == "png":
                         try:
                             images[0].save(
                                 output,
@@ -135,7 +138,7 @@ class Client:
                             )
                         except AttributeError as e:
                             logger.error(f"{type(e)}: {str(e)}")
-                    elif os.path.splitext(output)[1] == ".webp":
+                    elif format == "webp":
                         webp.save_images(images, output, fps=(1000 / gcd))
                     os.utime(output, times=(ctime, ctime))
                     shutil.rmtree(ugoira_path)
@@ -364,8 +367,7 @@ class Client:
             return path
 
     def option(self):
-        option = Write.Input(Center.XCenter("[OPTION] > ", spaces=40), Colors.green_to_black, interval=0,
-                             hide_cursor=False)
+        option = input_("[OPTION] > ", hide_cursor=False)
         logger.debug(option)
         if s := re.search(r"(\d+)users", option):
             self.users = int(s.group(1))
@@ -730,11 +732,11 @@ def notification(message: str):
 
 
 def print_(text: str):
-    print(Colorate.Vertical(Colors.green_to_black, Center.XCenter(text, spaces=40), 3))
+    print(Colorate.Vertical(Colors.green_to_black, Center.XCenter(text, spaces=spaces), 3))
 
 
-def input_(text: str):
-    return Write.Input(Center.XCenter(text, spaces=40), Colors.green_to_black, interval=0)
+def input_(text: str, hide_cursor=True):
+    return Write.Input(Center.XCenter(text, spaces=spaces), Colors.green_to_black, interval=0, hide_cursor=hide_cursor)
 
 
 def load_settings():
@@ -771,8 +773,9 @@ menu = """
 [r] Recent    [l] Login      [R] Reload
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-__version__ = "1.6"
+__version__ = "1.6.1"
 System.Title(f"SUBARU v{__version__}")
+spaces = len(Center.XCenter(menu).split("\n")[0])
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 logger = make_logger(__name__)
@@ -836,8 +839,7 @@ if __name__ == "__main__":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
             print("")
-            word = Write.Input(Center.XCenter("[WORD] > ", spaces=40), Colors.green_to_black, interval=0,
-                               hide_cursor=False)
+            word = input_("[WORD] > ", hide_cursor=False)
             client.option()
             try:
                 with console.status("[bold green]Fetching data...") as status:

@@ -30,6 +30,7 @@
    - 対応形式
      - gif
      - webp
+     - apng
  - 通知機能
    - デスクトップ通知やdiscord webhookで通知を送る
    - レポート機能

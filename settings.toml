@@ -5,13 +5,13 @@ refresh_token = []
 [folder]
 # 機能スイッチ
 enable = true
-# フォローユーザーを自動でフォルダ分け
+# フォローしているユーザーをフォルダ分け
 follow_user = true
 # フォルダ分けしたいタグ名を入力
-# "<タグ名>",
+# "<タグ名>"
 tag = []
 # フォルダ分けしたいユーザーのIDを入力
-# <ID>,
+# <ID>
 user = []
 # タグ名､表記揺れのタグ名を入力
 # {tag = "<タグ名>", vague = ["<表記揺れタグ名>",]
@@ -21,19 +21,25 @@ vague = []
 enable = true
 # AIイラストをダウンロードしないようにする
 ai_illust = false
+# ダウンロードしないタグ名を入力
+# "<タグ名>"
 tag = []
+# ダウンロードしないユーザーのIDを入力
+# <ID>
 user = []
 
 [ugoira2gif]
 enable = true
 # スレッドとして処理するか
-# 有効にした場合パソコンが重くなるかもしれない
+# 有効にした場合ダウンロードが早くなるが重くなるかも
 thread = true
 # フォーマット名を入力
-# webp､gifのみ対応
+# webp,gif,apngのみ対応
+# 上記フォーマット以外を指定した場合は自動で無効
 format = "gif"
 
 [notification]
+# 機能スイッチ
 enable = true
 
 [notification.report]
@@ -51,6 +57,7 @@ enable = false
 webhookUrl = ""
 
 [notification.discord.mention]
+# 機能スイッチ
 enable = false
 # 自分のIDを入力することでメンションが可能
 # 未入力の場合自動で無効
