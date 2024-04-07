@@ -22,22 +22,18 @@
    - ``ugoira-not`` -> うごイラ以外をダウンロードする
  - ブロック機能
    - 特定のタグやユーザー､AI生成のイラストをダウンロードしないようにする
-   - settings.tomlにタグ名かユーザーIDを書き込む ```[ignore] -> tag = ["<TAG_NAME>"], user = [<USER_ID>]```
-   - settings.tomlでAI生成のイラストをダウンロードしないようにするか切り替える ```[ignore] -> ai_illust = true```
  - フォルダ分け機能
-   - 特定のタグやユーザーのイラストをフォルダごとに分けるようにする
-   - settings.tomlにタグ名かユーザーIDを書き込む ```[folder] -> tag = ["<TAG_NAME>"], user = [<USER_ID>]```
+   - 特定のタグやユーザー､フォローしているユーザーのイラストをフォルダごとに分けるようにする
    - 曖昧タグ機能
-     - 同じ意味合いの別名のタグを同じタグとして扱うようにする
-     - settings.tomlにタグ名を書き込む ```[folder] -> vague = [{tag = "<TAG_NAME>", vague = ["<VAGUE_TAG_NANE>",...]}]``` - 例 ![](https://cdn.discordapp.com/attachments/1111172092654796813/1218064910009765918/image.png?ex=66064e59&is=65f3d959&hm=feb72dc0b9cda560c89b24fa0c25ad02ca55c10e0263ebe7d6b08b121d40c3fb&)
+     - 表記揺れタグを一つのタグとして扱うようにする
  - うごイラ変換機能
-   - settings.tomlにフォーマット名を書き込む ```[ugoira2gif] -> format = "<FORMAT>"```
    - 対応形式
      - gif
      - webp
  - 通知機能
    - デスクトップ通知やdiscord webhookで通知を送る
-   - settings.tomlから設定を行う
+   - レポート機能
+     - 定期的にダウンロードの進捗を通知する
  - リロード
    - 設定ファイルを再読み込みする
  - OffsetLimitBypass

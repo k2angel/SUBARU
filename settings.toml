@@ -1,33 +1,57 @@
+# ダウンロードするディレクトリ
 directory = "./img"
 refresh_token = []
 
 [folder]
+# 機能スイッチ
 enable = true
+# フォローユーザーを自動でフォルダ分け
+follow_user = true
+# フォルダ分けしたいタグ名を入力
+# "<タグ名>",
 tag = []
+# フォルダ分けしたいユーザーのIDを入力
+# <ID>,
 user = []
+# タグ名､表記揺れのタグ名を入力
+# {tag = "<タグ名>", vague = ["<表記揺れタグ名>",]
 vague = []
 
 [ignore]
 enable = true
+# AIイラストをダウンロードしないようにする
 ai_illust = false
 tag = []
 user = []
 
 [ugoira2gif]
 enable = true
+# スレッドとして処理するか
+# 有効にした場合パソコンが重くなるかもしれない
 thread = true
+# フォーマット名を入力
+# webp､gifのみ対応
 format = "gif"
 
 [notification]
 enable = true
+
+[notification.report]
+enable = true
+# 進捗を通知する際のインターバル
+interval = 60
 
 [notification.desktop]
 enable = true
 
 [notification.discord]
 enable = false
+# webhookのurlを入力
+# 未入力の場合自動で無効
 webhookUrl = ""
 
 [notification.discord.mention]
 enable = false
+# 自分のIDを入力することでメンションが可能
+# 未入力の場合自動で無効
 discordId = ""
