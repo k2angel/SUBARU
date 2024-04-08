@@ -470,14 +470,14 @@ class Client:
             self.manga = False
         elif "mang" in option:
             self.manga = True
-        if "r-18" in option:
-            self.r18 = True
-        elif "r-18-not" in option:
+        if "r-18-not" in option:
             self.r18 = False
-        if "r-18g" in option:
-            self.r18g = True
-        elif "r-18g-not" in option:
+        elif "r-18" in option:
+            self.r18 = True
+        if "r-18g-not" in option:
             self.r18g = False
+        elif "r-18g" in option:
+            self.r18g = True
         # print_(f"[OPTION] users: users: {self.users}, page: {page}, ugoira: {self.ugoira}")
         logger.debug(f"OPTION: users={self.users}, page={self.page}, ugoira={self.ugoira}, r-18={self.r18}, r-18g={self.r18g}")
 
@@ -529,8 +529,8 @@ class Client:
                 for i in i_obj:
                     if not init_offset:
                         next_qs["offset"] = i * 30
-                    data = self.aapi.user_illusts(**next_qs)
                     try:
+                        data = self.aapi.user_illusts(**next_qs)
                         illusts = data["illusts"]
                         for illust in illusts:
                             self.parse(illust)
@@ -583,8 +583,9 @@ class Client:
             for i in i_obj:
                 if not init_offset:
                     next_qs["offset"] = i * 30
-                data = self.aapi.user_bookmarks_illust(**next_qs)
+
                 try:
+                    data = self.aapi.user_bookmarks_illust(**next_qs)
                     illusts = data["illusts"]
                     for illust in illusts:
                         self.parse(illust)
@@ -647,8 +648,8 @@ class Client:
             for i in i_obj:
                 if not init_offset:
                     next_qs["offset"] = i * 30
-                data = self.aapi.search_illust(**next_qs)
                 try:
+                    data = self.aapi.search_illust(**next_qs)
                     illusts = data["illusts"]
                     for illust in illusts:
                         self.parse(illust)
@@ -702,8 +703,9 @@ class Client:
             for i in i_obj:
                 if not init_offset:
                     next_qs["offset"] = i * 30
-                data = self.aapi.illust_new(**next_qs)
+
                 try:
+                    data = self.aapi.illust_new(**next_qs)
                     illusts = data["illusts"]
                     for illust in illusts:
                         self.parse(illust)
