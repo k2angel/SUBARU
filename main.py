@@ -38,7 +38,11 @@ class Client:
         self.access_token_get, self.expires_in = self.login()
         self.queue = deque()
         self.users = 0
+        self.illust_ = None
+        self.manga = None
         self.ugoira = None
+        self.r18 = None
+        self.r18g = None
         self.page = [count()]
         self.reporter_run = settings["notification"]["report"]["enable"]
         if not os.path.exists("./stalker.json"):
@@ -241,7 +245,11 @@ class Client:
                 reporter_t.join()
                 self.reporter_run = settings["notification"]["report"]["enable"]
             self.users = 0
+            self.illust_ = None
+            self.manga = None
             self.ugoira = None
+            self.r18 = None
+            self.r18g = None
             self.page = [count()]
             elapsed = time.time() - start
             info = f"TIME: {datetime.timedelta(seconds=elapsed)}\nFILES: {files_num}\nSIZE: {convert_size(files_size)}"
@@ -271,7 +279,9 @@ class Client:
         is_muted = illust["is_muted"]
         illust_type = illust["type"]
         illust_ai_type = illust["illust_ai_type"]
-        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type):
+        x_restrict = illust["x_restrict"]
+        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type,
+                                x_restrict):
             if type(result) is str:
                 folder = result
             else:
@@ -320,22 +330,50 @@ class Client:
             self.queue.append(data)
 
     def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool,
-              illust_type: bool, illust_ai_type: int):
+              illust_type: bool, illust_ai_type: int, x_restrict: int):
         if settings["ignore"]["enable"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
                 # logger.debug("ignore")
                 return False
-            if settings["ignore"]["ai_illust"] and illust_ai_type == 2:
-                return False
+            if settings["ignore"]["ai_illust"]["enable"] and illust_ai_type == 2:
+                if not settings["ignore"]["ai_illust"]["follow_user"]:
+                    return False
+                elif not user["is_followed"]:
+                    return False
+                logger.debug(f"{settings['ignore']['ai_illust']['follow_user']} == {user['is_followed']}")
         if self.users > total_bookmarks:
             # logger.debug(f"{self.users} > {total_bookmarks}")
+            return False
+        if self.illust_ and not illust_type == "illust":
+            logger.debug(f"{self.illust_} == {illust_type}")
+            return False
+        elif self.illust_ is False and illust_type != "illust":
+            logger.debug(f"{self.illust_} == {illust_type}")
+            return False
+        if self.manga and not illust_type == "manga":
+            logger.debug(f"{self.manga} == {illust_type}")
+            return False
+        elif self.manga is False and illust_type != "manga":
+            logger.debug(f"{self.manga} == {illust_type}")
             return False
         if self.ugoira and not illust_type == "ugoira":
             logger.debug(f"{self.ugoira} == {illust_type}")
             return False
         elif self.ugoira is False and illust_type != "ugoira":
             logger.debug(f"{self.ugoira} == {illust_type}")
+            return False
+        if self.r18 and x_restrict == 0:
+            logger.debug(f"{self.r18} == {x_restrict}")
+            return False
+        elif self.r18 is False and x_restrict != 0:
+            logger.debug(f"{self.r18} == {x_restrict}")
+            return False
+        if self.r18g and x_restrict == 0:
+            logger.debug(f"{self.r18g} == {x_restrict}")
+            return False
+        elif self.r18g is False and x_restrict != 2:
+            logger.debug(f"{self.r18g} == {x_restrict}")
             return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
@@ -424,12 +462,24 @@ class Client:
                 self.page.append(range(start % 166))
             else:  # 100page
                 self.page = [range(start)]
-        if "ugoira-not" in option:
-            self.ugoira = False
-        elif "ugoira" in option:
-            self.ugoira = True
+        if "illust-not" in option:
+            self.illust_ = False
+        elif "illust" in option:
+            self.illust_ = True
+        if "manga-not" in option:
+            self.manga = False
+        elif "mang" in option:
+            self.manga = True
+        if "r-18" in option:
+            self.r18 = True
+        elif "r-18-not" in option:
+            self.r18 = False
+        if "r-18g" in option:
+            self.r18g = True
+        elif "r-18g-not" in option:
+            self.r18g = False
         # print_(f"[OPTION] users: users: {self.users}, page: {page}, ugoira: {self.ugoira}")
-        logger.debug(f"OPTION: users={self.users}, page={self.page}, ugoira={self.ugoira}")
+        logger.debug(f"OPTION: users={self.users}, page={self.page}, ugoira={self.ugoira}, r-18={self.r18}, r-18g={self.r18g}")
 
     def illust(self, id):
         self.expires_check()
@@ -637,11 +687,11 @@ class Client:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
                         break
                     time.sleep(1)
-        # info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
-        # print("")
-        # print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-        # print("")
-        # notification(info)
+        info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
+        print("")
+        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+        print("")
+        notification(info)
 
     def recent(self):
         self.expires_check()
@@ -705,6 +755,11 @@ class Client:
                         notification(info)
                         break
                     time.sleep(1)
+        info = f"USERS: {self.users}\nILLUSTS: {len(self.queue)}"
+        print("")
+        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+        print("")
+        notification(info)
 
     def novel(self, id):
         # 小説内容
@@ -793,7 +848,7 @@ menu = """
 [r] Recent    [l] Login      [R] Reload
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-__version__ = "1.6.2"
+__version__ = "1.6.3"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
 

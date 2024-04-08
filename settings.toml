@@ -14,13 +14,12 @@ tag = []
 # <ID>
 user = []
 # タグ名､表記揺れのタグ名を入力
-# {tag = "<タグ名>", vague = ["<表記揺れタグ名>",]
+# {tag = "<タグ名>", vague = ["<表記揺れタグ名>"]}
 vague = []
 
 [ignore]
 enable = true
-# AIイラストをダウンロードしないようにする
-ai_illust = false
+
 # ダウンロードしないタグ名を入力
 # "<タグ名>"
 tag = []
@@ -28,23 +27,28 @@ tag = []
 # <ID>
 user = []
 
+[ignore.ai_illust]
+# AIイラストをダウンロードしないようにする
+enable = true
+# フォローしているユーザーのAIイラストはダウンロードする
+follow_user = true
+
 [ugoira2gif]
 enable = true
 # スレッドとして処理するか
-# 有効にした場合ダウンロードが早くなるが重くなるかも
 thread = true
 # フォーマット名を入力
 # webp,gif,apngのみ対応
-# 上記フォーマット以外を指定した場合は自動で無効
+# 上記フォーマット以外､または未入力の場合は無効
 format = "gif"
 
 [notification]
-# 機能スイッチ
 enable = true
 
 [notification.report]
 enable = true
 # 進捗を通知する際のインターバル
+# 分単位
 interval = 60
 
 [notification.desktop]
@@ -53,12 +57,11 @@ enable = true
 [notification.discord]
 enable = false
 # webhookのurlを入力
-# 未入力の場合自動で無効
+# 未入力の場合は無効
 webhookUrl = ""
 
 [notification.discord.mention]
-# 機能スイッチ
 enable = false
 # 自分のIDを入力することでメンションが可能
-# 未入力の場合自動で無効
+# 未入力の場合は無効
 discordId = ""
