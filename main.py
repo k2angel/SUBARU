@@ -244,13 +244,6 @@ class Client:
                 self.reporter_run = False
                 reporter_t.join()
                 self.reporter_run = settings["notification"]["report"]["enable"]
-            self.users = 0
-            self.illust_ = None
-            self.manga = None
-            self.ugoira = None
-            self.r18 = None
-            self.r18g = None
-            self.page = [count()]
             elapsed = time.time() - start
             info = f"TIME: {datetime.timedelta(seconds=elapsed)}\nFILES: {files_num}\nSIZE: {convert_size(files_size)}"
             print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
@@ -258,6 +251,13 @@ class Client:
             notification(f"Download finished.\n{info}")
         else:
             print_("[!] There is nothing in the queue.")
+        self.users = 0
+        self.illust_ = None
+        self.manga = None
+        self.ugoira = None
+        self.r18 = None
+        self.r18g = None
+        self.page = [count()]
 
     def parse(self, illust: dict):
         id = illust["id"]
