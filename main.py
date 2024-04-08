@@ -17,6 +17,7 @@ from collections import deque
 from itertools import count
 from logging import DEBUG, FileHandler, Formatter, getLogger
 
+import tomli_w
 import webp
 from discord_webhook import DiscordWebhook
 from PIL import Image, UnidentifiedImageError
@@ -26,7 +27,6 @@ from plyer import notification as notice
 from pystyle import *
 from requests.exceptions import ChunkedEncodingError
 from rich.console import Console
-from tomli_w import dump
 from tqdm import tqdm
 from urllib3.exceptions import ProtocolError
 
@@ -103,10 +103,13 @@ class Client:
             return f"{size} {units[i]}"
 
         def ugoira2gif(ugoira_zip, path, id, delays):
-            format = settings['ugoira2gif']['format']
-            if format == "gif" or format == "webp" or format == "png":
+            u_format = settings['ugoira2gif']['format']
+            if u_format == "gif" or u_format == "webp" or u_format == "apng":
+                if u_format == "apng":
+                    u_format = "png"
+            else:
                 return
-            output = os.path.join(path, f"{id}_p0 ugoira.{settings['ugoira2gif']['format']}")
+            output = os.path.join(path, f"{id}_p0 ugoira.{u_format}")
             ctime = os.path.getctime(ugoira_zip)
             images = list()
             try:
@@ -120,13 +123,15 @@ class Client:
                 logger.error(f"{type(e)}: {str(e)}")
             else:
                 for delay, file in zip(delays, files):
-                    image = Image.open(os.path.join(ugoira_path, file)).quantize()
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
+                    image = Image.open(os.path.join(ugoira_path, file))
+                    if u_format == "gif" or u_format == "webp":
+                        image = image.quantize()
+                        # if image.mode != "RGB":
+                        #     image = image.convert("RGB")
                     for _ in range(math.floor(delay / gcd)):
                         images.append(image)
                 else:
-                    if format == "gif" or format == "png":
+                    if u_format == "gif" or u_format == "png":
                         try:
                             images[0].save(
                                 output,
@@ -138,7 +143,7 @@ class Client:
                             )
                         except AttributeError as e:
                             logger.error(f"{type(e)}: {str(e)}")
-                    elif format == "webp":
+                    elif u_format == "webp":
                         webp.save_images(images, output, fps=(1000 / gcd))
                     os.utime(output, times=(ctime, ctime))
                     shutil.rmtree(ugoira_path)
@@ -169,13 +174,21 @@ class Client:
                 attachments = data["attachments"]
                 for attachment in tqdm(attachments, desc="Attachments", leave=False):
                     file = os.path.join(path, os.path.basename(attachment))
-                    if os.path.exists(file):
+                    if data["type"] == "ugoira":
+                        u_format = settings['ugoira2gif']['format']
+                        if u_format == "gif" or u_format == "webp" or u_format == "apng":
+                            if u_format == "apng":
+                                u_format = "png"
+                            e_path = os.path.join(path, f"{post_id}_p0 ugoira.{u_format}")
+                            if os.path.exists(e_path):
+                                logger.debug(f"exists file: {e_path}")
+                                continue
+                        else:
+                            continue
+                    elif os.path.exists(file):
                         logger.debug(f"exists file: {file}")
                         continue
-                    elif (data["type"] == "ugoira" and
-                          os.path.exists(os.path.join(path, f"{post_id}_p0 ugoira.{settings['ugoira2gif']['format']}"))):
-                        logger.debug(f"exists file: {post_id}_p0 ugoira.{settings['ugoira2gif']['format']}")
-                        continue
+
                     while True:
                         try:
                             self.aapi.download(attachment, path=path)
@@ -331,19 +344,19 @@ class Client:
                 path = user["name"].translate(str.maketrans(
                     {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
                      '<': '＜', '>': '＞', '|': '｜'}))
-                return f"{self.stalker_check(str(user['id']), path)}[{user['id']}]"
+                return f"users/{self.stalker_check(str(user['id']), path)}[{user['id']}]"
             if user["id"] in settings["folder"]["user"]:
                 for fuser in settings["folder"]["user"]:
                     if fuser == user["id"]:
                         path = user["name"].translate(str.maketrans(
                             {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
                              '<': '＜', '>': '＞', '|': '｜'}))
-                        return f"{self.stalker_check(str(user['id']), path)}[{user['id']}]"
+                        return f"users/{self.stalker_check(str(user['id']), path)}[{user['id']}]"
             if not set(tags).isdisjoint(settings["folder"]["tag"]):
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
                         # logger.debug(ftag)
-                        return ftag
+                        return "tags/"+ftag
         return True
 
     def stalker_check(self, uuid: str, path: str):
@@ -740,8 +753,15 @@ def input_(text: str, hide_cursor=True):
 
 
 def load_settings():
-    with open("settings.toml", "rb") as f:
-        settings = tomllib.load(f)
+    try:
+        with open("settings.toml", "rb") as f:
+            settings = tomllib.load(f)
+    except FileNotFoundError:
+        import requests
+        res = requests.get("https://raw.githubusercontent.com/k2angel/SUBARU/main/settings.toml")
+        settings = tomllib.loads(res.text)
+        with open("settings.toml", "w", encoding="utf-8") as f:
+            print(res.text, f)
     print_("[*] Load settings.")
     return settings
 
@@ -773,7 +793,7 @@ menu = """
 [r] Recent    [l] Login      [R] Reload
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-__version__ = "1.6.1"
+__version__ = "1.6.2"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
 
@@ -790,7 +810,7 @@ except IndexError as e:
     if refresh_token not in settings["refresh_token"]:
         settings["refresh_token"].append(refresh_token)
         with open("settings.toml", "wb") as f:
-            dump(settings, f)
+            tomli_w.dump(settings, f)
     client = Client(refresh_token)
 
 console = Console()
