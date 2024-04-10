@@ -94,7 +94,7 @@ class Client:
                 time.sleep(1)
             if not self.reporter_run:
                 break
-            info = f"LEFTOVER QUEUE: {len(self.queue)}"
+            info = f"LEFTOVER QUEUE: {len(self.queue)+1}"
             notification(info)
         logger.debug("reporter stopped...")
 
@@ -260,7 +260,7 @@ class Client:
         self.page = [count()]
 
     def parse(self, illust: dict):
-        id = illust["id"]
+        id_ = illust["id"]
         user = {
             "id": illust["user"]["id"],
             "name": illust["user"]["name"],
@@ -272,7 +272,7 @@ class Client:
             tag = tags[i]
             for vague in settings["folder"]["vague"]:
                 if tag in vague["vague"]:
-                    logger.debug(f"{tag} -> {vague['tag']}")
+                    #logger.debug(f"{tag} -> {vague['tag']}")
                     tags[i] = tag.replace(tag, vague["tag"])
         total_bookmarks = illust["total_bookmarks"]
         is_bookmarked = illust["is_bookmarked"]
@@ -280,7 +280,7 @@ class Client:
         illust_type = illust["type"]
         illust_ai_type = illust["illust_ai_type"]
         x_restrict = illust["x_restrict"]
-        if result := self.check(id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type,
+        if result := self.check(id_, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type,
                                 x_restrict):
             if type(result) is str:
                 folder = result
@@ -288,7 +288,7 @@ class Client:
                 folder = ""
             create_date = illust["create_date"]
             data = {
-                "id": id,
+                "id": id_,
                 "attachments": [],
                 "type": illust_type,
                 "folder": folder,
@@ -297,7 +297,7 @@ class Client:
             if illust_type == "ugoira":
                 while True:
                     try:
-                        ugoira_data = self.aapi.ugoira_metadata(id)
+                        ugoira_data = self.aapi.ugoira_metadata(id_)
                         data["attachments"].append(ugoira_data["ugoira_metadata"]["zip_urls"]["medium"])
                         data["delays"] = [frame["delay"] for frame in ugoira_data["ugoira_metadata"]["frames"]]
                     except PixivError as e:
@@ -328,52 +328,54 @@ class Client:
                 except KeyError:
                     data["attachments"] = [attachment["image_urls"]["original"] for attachment in illust["meta_pages"]]
             self.queue.append(data)
+            logger.debug(f"queue append: {data['id']}")
 
     def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool,
               illust_type: bool, illust_ai_type: int, x_restrict: int):
         if settings["ignore"]["enable"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
-                # logger.debug("ignore")
+                logger.debug("ignore")
                 return False
             if settings["ignore"]["ai_illust"]["enable"] and illust_ai_type == 2:
                 if not settings["ignore"]["ai_illust"]["follow_user"]:
+                    logger.debug("ignore: AI")
                     return False
                 elif not user["is_followed"]:
+                    logger.debug("ignore: AI")
                     return False
-                logger.debug(f"{settings['ignore']['ai_illust']['follow_user']} == {user['is_followed']}")
         if self.users > total_bookmarks:
-            # logger.debug(f"{self.users} > {total_bookmarks}")
+            logger.debug(f"ignore users: {self.users} > {total_bookmarks}")
             return False
         if self.illust_ and not illust_type == "illust":
-            logger.debug(f"{self.illust_} == {illust_type}")
+            logger.debug(f"exclusive illust: {illust_type}")
             return False
         elif self.illust_ is False and illust_type != "illust":
-            logger.debug(f"{self.illust_} == {illust_type}")
+            logger.debug(f"ignore illust: {illust_type}")
             return False
         if self.manga and not illust_type == "manga":
-            logger.debug(f"{self.manga} == {illust_type}")
+            logger.debug(f"exclusive manga: {illust_type}")
             return False
         elif self.manga is False and illust_type != "manga":
-            logger.debug(f"{self.manga} == {illust_type}")
+            logger.debug(f"ignore manga: {illust_type}")
             return False
         if self.ugoira and not illust_type == "ugoira":
-            logger.debug(f"{self.ugoira} == {illust_type}")
+            logger.debug(f"exclusive ugoira: {illust_type}")
             return False
         elif self.ugoira is False and illust_type != "ugoira":
-            logger.debug(f"{self.ugoira} == {illust_type}")
+            logger.debug(f"ignore ugoira: {illust_type}")
             return False
         if self.r18 and x_restrict == 0:
-            logger.debug(f"{self.r18} == {x_restrict}")
+            logger.debug(f"exclusive R-18: {x_restrict}")
             return False
         elif self.r18 is False and x_restrict != 0:
-            logger.debug(f"{self.r18} == {x_restrict}")
+            logger.debug(f"ignore R-18: {x_restrict}")
             return False
-        if self.r18g and x_restrict == 0:
-            logger.debug(f"{self.r18g} == {x_restrict}")
+        if self.r18g and x_restrict != 2:
+            logger.debug(f"exclusive R-18g: {x_restrict}")
             return False
-        elif self.r18g is False and x_restrict != 2:
-            logger.debug(f"{self.r18g} == {x_restrict}")
+        elif self.r18g is False and x_restrict == 2:
+            logger.debug(f"ignore R-18g: {x_restrict}")
             return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
@@ -479,7 +481,9 @@ class Client:
         elif "r-18g" in option:
             self.r18g = True
         # print_(f"[OPTION] users: users: {self.users}, page: {page}, ugoira: {self.ugoira}")
-        logger.debug(f"OPTION: users={self.users}, page={self.page}, ugoira={self.ugoira}, r-18={self.r18}, r-18g={self.r18g}")
+        logger.debug(f"OPTION: users={self.users}, page={self.page}, "
+                     f"illust={self.illust_}, manga={self.manga}, ugoira={self.ugoira}, "
+                     f"r-18={self.r18}, r-18g={self.r18g}")
 
     def illust(self, id):
         self.expires_check()
