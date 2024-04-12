@@ -1,6 +1,6 @@
 # ダウンロードするディレクトリ
 directory = "./img"
-refresh_token = []
+refresh_token = ""
 
 [folder]
 # 機能スイッチ

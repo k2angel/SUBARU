@@ -2,9 +2,15 @@
 渋ダウンローダー.
 
 ## 使い方
-1. ```pip install -r requirements.txt``` を実行
-2. ``main.py`` を実行
-3. 初回起動時はchromeが起動するのでpixivにログインする
+### refresh tokenを持っている人用
+   1. settings.tomlにrefresh tokenを書き込む
+   2. ```pip install -r requirements.txt``` を実行
+   3. ``main.py`` を実行
+### refresh tokenを持っていない人用
+   1. 自分のchromeのバージョンに合ったchromedriverをディレクトリ内に配置する
+   2. ```pip install -r requirements.txt``` を実行
+   3. ``main.py`` を実行
+   4. 初回起動時chromeが立ち上がるのでpixivにログインする
 
 ## 機能
  - ダウンロード機能
@@ -39,6 +45,9 @@
      - gif
      - webp
      - apng
+ - キューリジューム機能
+   - 途中で終了したキューを再開する
+   - キューは何個でも保存可能
  - 通知機能
    - デスクトップ通知やdiscord webhookで通知を送る
    - レポート機能

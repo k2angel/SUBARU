@@ -36,22 +36,35 @@ class Client:
         self.aapi = AppPixivAPI()
         self.refresh_token = refresh_token
         self.access_token_get, self.expires_in = self.login()
-        self.queue = deque()
-        self.users = 0
-        self.illust_ = None
-        self.manga = None
-        self.ugoira = None
-        self.r18 = None
-        self.r18g = None
-        self.page = [count()]
-        self.reporter_run = settings["notification"]["report"]["enable"]
+        self.queue = {
+            "queue": deque(),
+            "time": None,
+            "name": "",
+            "option": "",
+            "size": 0
+        }
+        if not os.path.exists("./queue"):
+            self.queue_list = dict()
+            pickle.dump(self.queue_list, open("./queue", "wb"))
+        else:
+            self.queue_list = pickle.load(open("./queue", "rb"))
         if not os.path.exists("./stalker.json"):
-            self.stalker = {}
+            self.stalker = dict()
             with open("./stalker.json", "w", encoding="utf-8") as f:
                 json.dump(self.stalker, f, indent=4, ensure_ascii=False)
         else:
             with open("./stalker.json", "r", encoding="utf-8") as f:
                 self.stalker = json.load(f)
+        self.option_ = {
+            "users": 0,
+            "illust": None,
+            "manga": None,
+            "ugoira": None,
+            "r-18": None,
+            "r-18g": None,
+            "page": [count()]
+        }
+        self.reporter_run = settings["notification"]["report"]["enable"]
 
     def login(self):
         while True:
@@ -157,12 +170,16 @@ class Client:
             except PermissionError as e:
                 logger.error(f"{type(e)}: {str(e)}")
 
-        if qsize := len(self.queue):
+        if qsize := len(self.queue["queue"]):
             files_num = 0
             files_size = 0
             print_("[*] Download started.")
             notification("Download stared.")
             start = time.time()
+            self.queue["time"] = datetime.datetime.now()
+            self.queue["size"] = qsize
+            self.queue_list[str(start)] = self.queue
+            pickle.dump(self.queue_list, open("./queue", "wb"))
             if qsize != 1:
                 qbar = tqdm(total=qsize, desc="Queue", leave=False)
                 logger.debug(f"qsize: {qsize}")
@@ -170,7 +187,7 @@ class Client:
                     reporter_t = threading.Thread(target=self.reporter)
                     reporter_t.start()
             for i in range(qsize):
-                data = self.queue.popleft()
+                data = self.queue["queue"].popleft()
                 path = str(os.path.join(settings["directory"], data["folder"]))
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
@@ -216,12 +233,18 @@ class Client:
                             time.sleep(10)
                         except KeyboardInterrupt:
                             print_("[*] Stopped.")
+                            if "reporter_t" in locals():
+                                self.reporter_run = False
+                                reporter_t.join()
+                                self.reporter_run = settings["notification"]["report"]["enable"]
                             input()
                             self.expires_check()
+                            if "reporter_t" in locals():
+                                reporter_t.start()
                         except OSError as e:
                             if str(e) == "[Errno 28] No space left on device":
                                 with open("./queue", "wb") as f:
-                                    pickle.dump(self.queue, f)
+                                    pickle.dump(self.queue["queue"], f)
                                 print_("[!] No space left on device.")
                             elif type(e) is FileNotFoundError:
                                 logger.error(f"{type(e)}: {str(e)}")
@@ -238,8 +261,13 @@ class Client:
                             exit()
                 if "qbar" in locals():
                     qbar.update()
+                    self.queue["size"] = len(self.queue["queue"])
+                    self.queue_list[str(start)] = self.queue
+                    pickle.dump(self.queue_list, open("./queue", "wb"))
             if "qbar" in locals():
                 qbar.close()
+            del self.queue_list[str(start)]
+            pickle.dump(self.queue_list, open("./queue", "wb"))
             if "reporter_t" in locals():
                 self.reporter_run = False
                 reporter_t.join()
@@ -251,15 +279,18 @@ class Client:
             notification(f"Download finished.\n{info}")
         else:
             print_("[!] There is nothing in the queue.")
-        self.users = 0
-        self.illust_ = None
-        self.manga = None
-        self.ugoira = None
-        self.r18 = None
-        self.r18g = None
-        self.page = [count()]
+        # init option
+        self.option_ = {
+            "users": 0,
+            "illust": None,
+            "manga": None,
+            "ugoira": None,
+            "r-18": None,
+            "r-18g": None,
+            "page": [count()]
+        }
 
-    def parse(self, illust: dict):
+    def parse(self, illust):
         id_ = illust["id"]
         user = {
             "id": illust["user"]["id"],
@@ -327,11 +358,10 @@ class Client:
                     data["attachments"].append(illust["meta_single_page"]["original_image_url"])
                 except KeyError:
                     data["attachments"] = [attachment["image_urls"]["original"] for attachment in illust["meta_pages"]]
-            self.queue.append(data)
+            self.queue["queue"].append(data)
             logger.debug(f"queue append: {data['id']}")
 
-    def check(self, id: int, user: dict, tags: list, total_bookmarks: int, is_bookmarked: bool, is_muted: bool,
-              illust_type: bool, illust_ai_type: int, x_restrict: int):
+    def check(self, id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type, x_restrict):
         if settings["ignore"]["enable"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
@@ -344,38 +374,38 @@ class Client:
                 elif not user["is_followed"]:
                     logger.debug("ignore: AI")
                     return False
-        if self.users > total_bookmarks:
-            logger.debug(f"ignore users: {self.users} > {total_bookmarks}")
+        if self.option_["users"] > total_bookmarks:
+            logger.debug(f"ignore users: {self.option_['users']} > {total_bookmarks}")
             return False
-        if self.illust_ and not illust_type == "illust":
+        if self.option_["illust"] and not illust_type == "illust":
             logger.debug(f"exclusive illust: {illust_type}")
             return False
-        elif self.illust_ is False and illust_type != "illust":
+        elif self.option_["illust"] is False and illust_type != "illust":
             logger.debug(f"ignore illust: {illust_type}")
             return False
-        if self.manga and not illust_type == "manga":
+        if self.option_["manga"] and not illust_type == "manga":
             logger.debug(f"exclusive manga: {illust_type}")
             return False
-        elif self.manga is False and illust_type != "manga":
+        elif self.option_["manga"] is False and illust_type != "manga":
             logger.debug(f"ignore manga: {illust_type}")
             return False
-        if self.ugoira and not illust_type == "ugoira":
+        if self.option_["ugoira"] and not illust_type == "ugoira":
             logger.debug(f"exclusive ugoira: {illust_type}")
             return False
-        elif self.ugoira is False and illust_type != "ugoira":
+        elif self.option_["ugoira"] is False and illust_type != "ugoira":
             logger.debug(f"ignore ugoira: {illust_type}")
             return False
-        if self.r18 and x_restrict == 0:
+        if self.option_["r-18"] and x_restrict == 0:
             logger.debug(f"exclusive R-18: {x_restrict}")
             return False
-        elif self.r18 is False and x_restrict != 0:
+        elif self.option_["r-18"] is False and x_restrict != 0:
             logger.debug(f"ignore R-18: {x_restrict}")
             return False
-        if self.r18g and x_restrict != 2:
-            logger.debug(f"exclusive R-18g: {x_restrict}")
+        if self.option_["r-18g"] and x_restrict != 2:
+            logger.debug(f"exclusive R-18G: {x_restrict}")
             return False
-        elif self.r18g is False and x_restrict == 2:
-            logger.debug(f"ignore R-18g: {x_restrict}")
+        elif self.option_["r-18g"] is False and x_restrict == 2:
+            logger.debug(f"ignore R-18G: {x_restrict}")
             return False
         if not is_bookmarked:
             self.aapi.illust_bookmark_add(id)
@@ -399,7 +429,7 @@ class Client:
                         return "tags/"+ftag
         return True
 
-    def stalker_check(self, uuid: str, path: str):
+    def stalker_check(self, uuid, path):
         try:
             if self.stalker[uuid] == path:
                 return path
@@ -421,9 +451,10 @@ class Client:
 
     def option(self):
         option = input_("[OPTION] > ", hide_cursor=False)
+        self.queue["option"] = option
         logger.debug(option)
         if s := re.search(r"(\d+)users", option):
-            self.users = int(s.group(1))
+            self.option_["users"] = int(s.group(1))
         if s := re.search(r"(\d+):(\d+)?page", option):
             start = int(s.group(1))
             if s.group(2) is None:  # 200:page
@@ -456,38 +487,38 @@ class Client:
                 else:  # 100:150page -> 50
                     # print(4)
                     page = [range(start, end)]
-            self.page = page
+            self.option_["page"] = page
         elif s := re.search(r"(\d+)page", option):
             start = int(s.group(1))
             if step := start // 166:  # 200page
-                self.page = [range(166)] * step
-                self.page.append(range(start % 166))
+                page = [range(166)] * step
+                page.append(range(start % 166))
             else:  # 100page
-                self.page = [range(start)]
+                page = [range(start)]
+            self.option_["page"] = page
         if "illust-not" in option:
-            self.illust_ = False
+            self.option_["illust"] = False
         elif "illust" in option:
-            self.illust_ = True
+            self.option_["illust"] = True
         if "manga-not" in option:
-            self.manga = False
+            self.option_["manga"] = False
         elif "mang" in option:
-            self.manga = True
+            self.option_["manga"] = True
         if "r-18-not" in option:
-            self.r18 = False
+            self.option_["r-18"] = False
         elif "r-18" in option:
-            self.r18 = True
+            self.option_["r-18"] = True
         if "r-18g-not" in option:
-            self.r18g = False
+            self.option_["r-18g"] = False
         elif "r-18g" in option:
-            self.r18g = True
-        # print_(f"[OPTION] users: users: {self.users}, page: {page}, ugoira: {self.ugoira}")
-        logger.debug(f"OPTION: users={self.users}, page={self.page}, "
-                     f"illust={self.illust_}, manga={self.manga}, ugoira={self.ugoira}, "
-                     f"r-18={self.r18}, r-18g={self.r18g}")
+            self.option_["r-18g"] = True
+        info = ", ".join([f"{key}={self.option_[key]}" for key in self.option_.keys()])
+        logger.debug(f"OPTION: {info}")
 
-    def illust(self, id):
+    def illust(self, id_):
         self.expires_check()
-        data = self.aapi.illust_detail(id)
+        self.queue["name"] = f"illust: {id_}"
+        data = self.aapi.illust_detail(id_)
         try:
             illust = data["illust"]
             self.parse(illust)
@@ -503,13 +534,14 @@ class Client:
         else:
             time.sleep(1)
 
-    def user(self, id):
+    def user(self, id_):
         self.expires_check()
         while True:
             try:
-                user_info = self.aapi.user_detail(id)
+                user_info = self.aapi.user_detail(id_)
                 info = (f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\n"
                         f"ILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}")
+                self.queue["name"] = f"user: {user_info['user']['name']}[{user_info['user']['id']}]"
                 print("")
                 print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                 print("")
@@ -520,17 +552,19 @@ class Client:
             except KeyError as e:
                 logger.error(f"{type(e)}: {str(e)}")
                 logger.error(user_info)
-                return
+                time.sleep(1)
             else:
                 break
         for type_ in ["illust", "manga"]:
-            next_qs = {"user_id": id, "type": type_}
+            next_qs = {"user_id": id_, "type": type_}
             init_offset = False
-            page = copy.deepcopy(self.page)
+            page = copy.deepcopy(self.option_["page"])
             logger.debug(f"{type_}: {page}")
+            debug_index = 0
             for i_obj in page:
                 logger.debug(i_obj)
                 for i in i_obj:
+                    debug_index = debug_index + 1
                     if not init_offset:
                         next_qs["offset"] = i * 30
                     try:
@@ -539,7 +573,7 @@ class Client:
                         for illust in illusts:
                             self.parse(illust)
                         next_qs = self.aapi.parse_qs(data["next_url"])
-                        logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
+                        logger.debug(f"page: {debug_index}, offset: {debug_index * 30}")
                         if next_qs["offset"] == "5010":
                             next_qs["start_date"] = str(
                                 datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
@@ -580,11 +614,14 @@ class Client:
 
     def bookmarks(self):
         self.expires_check()
+        self.queue["name"] = f"bookmarks: {self.aapi.user_id}"
         next_qs = {"user_id": self.aapi.user_id}
         init_offset = False
-        for i_obj in self.page:
+        debug_index = 0
+        for i_obj in self.option_["page"]:
             logger.debug(i_obj)
             for i in i_obj:
+                debug_index = debug_index + 1
                 if not init_offset:
                     next_qs["offset"] = i * 30
 
@@ -594,7 +631,7 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
+                    logger.debug(f"page: {debug_index}, offset: {debug_index*30}")
                     if next_qs["offset"] == "5010":
                         next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
@@ -625,7 +662,7 @@ class Client:
                         time.sleep(1)
                 except TypeError as e:
                     logger.error(f"{type(e)}: {str(e)}")
-                    info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                    info = f"PAGE: {self.option_['page']}\nILLUSTS: {len(self.queue['queue'])}"
                     print("")
                     print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                     print("")
@@ -634,7 +671,7 @@ class Client:
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                        info = f"PAGE: {self.option_['page']}\nILLUSTS: {len(self.queue['queue'])}"
                         print("")
                         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                         print("")
@@ -644,12 +681,15 @@ class Client:
 
     def search(self, word):
         self.expires_check()
+        self.queue["name"] = f"search: {word}"
         next_qs = {"word": word}
         init_offset = False
-        for i_obj in self.page:
+        debug_index = 0
+        for i_obj in self.option_["page"]:
             logger.debug(i_obj)
             logger.debug(next_qs)
             for i in i_obj:
+                debug_index = debug_index + 1
                 if not init_offset:
                     next_qs["offset"] = i * 30
                 try:
@@ -658,7 +698,7 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
+                    logger.debug(f"page: {debug_index}, offset: {debug_index * 30}")
                     if next_qs["offset"] == "5010":
                         next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
@@ -692,7 +732,7 @@ class Client:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
                         break
                     time.sleep(1)
-        info = f"WORD: {word}\nUSERS: {self.users}\nILLUSTS: {len(self.queue)}"
+        info = f"WORD: {word}\nUSERS: {self.option_['users']}\nILLUSTS: {len(self.queue['queue'])}"
         print("")
         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
         print("")
@@ -700,11 +740,14 @@ class Client:
 
     def recent(self):
         self.expires_check()
-        next_qs = {}
+        self.queue["name"] = f"recent: {self.aapi.user_id}"
+        next_qs = dict()
         init_offset = False
-        for i_obj in self.page:
+        debug_index = 0
+        for i_obj in self.option_["page"]:
             logger.debug(i_obj)
             for i in i_obj:
+                debug_index = debug_index + 1
                 if not init_offset:
                     next_qs["offset"] = i * 30
 
@@ -714,7 +757,7 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    logger.debug(f"page: {i}, offset: {int(next_qs['offset'])}")
+                    logger.debug(f"page: {debug_index}, offset: {debug_index * 30}")
                     if next_qs["offset"] == "5010":
                         next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
@@ -745,7 +788,7 @@ class Client:
                         time.sleep(1)
                 except TypeError as e:
                     logger.error(f"{type(e)}: {str(e)}")
-                    info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                    info = f"PAGE: {self.option_['page']}\nILLUSTS: {len(self.queue['queue'])}"
                     print("")
                     print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                     print("")
@@ -754,14 +797,14 @@ class Client:
                 else:
                     if next_qs is None:
                         logger.debug(f"{type(next_qs)}: {str(next_qs)}")
-                        info = f"PAGE: {self.page}\nILLUSTS: {len(self.queue)}"
+                        info = f"PAGE: {self.option_['page']}\nILLUSTS: {len(self.queue['queue'])}"
                         print("")
                         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                         print("")
                         notification(info)
                         break
                     time.sleep(1)
-        info = f"USERS: {self.users}\nILLUSTS: {len(self.queue)}"
+        info = f"USERS: {self.option_['users']}\nILLUSTS: {len(self.queue['queue'])}"
         print("")
         print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
         print("")
@@ -851,10 +894,11 @@ banner = r"""
 """
 menu = """
 [d] Download  [b] Bookmarks  [s] Search
-[r] Recent    [l] Login      [R] Reload
+[r] Recent    [q] Queue      [R] Reload
+
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
-__version__ = "1.6.3"
+__version__ = "1.7"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
 
@@ -862,14 +906,14 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 logger = make_logger(__name__)
 settings = load_settings()
 try:
-    client = Client(settings["refresh_token"][0])
+    client = Client(settings["refresh_token"])
 except IndexError as e:
     logger.error(f"{type(e)}: {str(e)}")
     print_("[!] refresh token is nothing.")
     from pixiv_auth import login
     refresh_token = login()
     if refresh_token not in settings["refresh_token"]:
-        settings["refresh_token"].append(refresh_token)
+        settings["refresh_token"] = refresh_token
         with open("settings.toml", "wb") as f:
             tomli_w.dump(settings, f)
     client = Client(refresh_token)
@@ -929,6 +973,26 @@ if __name__ == "__main__":
                 client.download()
             except Exception as e:
                 logger.error(f"{type(e)}: {str(e)}")
+        elif mode == "q":
+            System.Clear()
+            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print("")
+            qd = client.queue_list
+            ql = list()
+            for i, key in zip(range(len(qd.keys())), qd.keys()):
+                qd_ = qd[key]
+                print(f"[{i + 1}] {qd_['time'].strftime('%Y-%m-%d %H:%M:%S')} | {qd_['name']} | {qd_['option']} | {qd_['size']}")
+                ql.append(key)
+            try:
+                i = int(input_("[QUEUE] > "))
+                if i == 0:
+                    continue
+                client.queue = client.queue_list.pop(ql[i - 1])
+                client.download()
+            except ValueError:
+                print_("[!] Error.")
+                pass
+
         elif mode == "R":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
