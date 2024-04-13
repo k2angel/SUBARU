@@ -903,7 +903,7 @@ menu = """
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
 print("")
-__version__ = "1.7"
+__version__ = "1.7.1"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
 
