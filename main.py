@@ -65,6 +65,11 @@ class Client:
             "page": [count()]
         }
         self.reporter_run = settings["notification"]["report"]["enable"]
+        self.error_message = {
+            "ratelimit": "Rate Limit",
+            "invalid": "Error occurred at the OAuth process. Please check your Access Token to fix this. "
+                       "Error Message: invalid_grant"
+        }
 
     def login(self):
         while True:
@@ -107,7 +112,7 @@ class Client:
                 time.sleep(1)
             if not self.reporter_run:
                 break
-            info = f"LEFTOVER QUEUE: {len(self.queue)+1}"
+            info = f"LEFTOVER QUEUE: {len(self.queue['queue'])+1}"
             notification(info)
         logger.debug("reporter stopped...")
 
@@ -340,7 +345,7 @@ class Client:
                     except KeyError as e:
                         try:
                             message = ugoira_data["error"]["message"]
-                            if message == "RateLimit" or message == "Rate Limit":
+                            if message == self.error_message["ratelimit"]:
                                 print_("[!] RateLimit.")
                                 time.sleep(180)
                             else:
@@ -450,6 +455,7 @@ class Client:
             return path
 
     def option(self):
+        #default_option = settings["option"]
         option = input_("[OPTION] > ", hide_cursor=False)
         self.queue["option"] = option
         logger.debug(option)
@@ -541,7 +547,7 @@ class Client:
                 user_info = self.aapi.user_detail(id_)
                 info = (f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\n"
                         f"ILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}")
-                self.queue["name"] = f"user: {user_info['user']['name']}[{user_info['user']['id']}]"
+                self.queue["name"] = f"{user_info['user']['name']}[{user_info['user']['id']}]"
                 print("")
                 print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                 print("")
@@ -594,12 +600,11 @@ class Client:
                         logger.error(data)
                         try:
                             message = data["error"]["message"]
-                            if message == "RateLimit" or message == "Rate Limit":
+                            if message == self.error_message["ratelimit"]:
                                 print_("[!] RateLimit.")
                                 time.sleep(180)
-                            elif message == '{"offset":["offset must be no more than 5000"]}':
-                                # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
-                                time.sleep(1)
+                            elif message == self.error_message["invalid"]:
+                                self.access_token_get, self.expires_in = self.login()
                         except KeyError as e:
                             logger.error(f"{type(e)}: {str(e)}")
                             time.sleep(1)
@@ -614,7 +619,7 @@ class Client:
 
     def bookmarks(self):
         self.expires_check()
-        self.queue["name"] = f"bookmarks: {self.aapi.user_id}"
+        self.queue["name"] = f"bookmarks"
         next_qs = {"user_id": self.aapi.user_id}
         init_offset = False
         debug_index = 0
@@ -651,12 +656,11 @@ class Client:
                     logger.error(data)
                     try:
                         message = data["error"]["message"]
-                        if message == "RateLimit" or message == "Rate Limit":
+                        if message == self.error_message["ratelimit"]:
                             print_("[!] RateLimit.")
                             time.sleep(180)
-                        elif message == '{"offset":["offset must be no more than 5000"]}':
-                            # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
-                            time.sleep(1)
+                        elif message == self.error_message["invalid"]:
+                            self.access_token_get, self.expires_in = self.login()
                     except KeyError as e:
                         logger.error(f"{type(e)}: {str(e)}")
                         time.sleep(1)
@@ -681,7 +685,7 @@ class Client:
 
     def search(self, word):
         self.expires_check()
-        self.queue["name"] = f"search: {word}"
+        self.queue["name"] = f"{word}"
         next_qs = {"word": word}
         init_offset = False
         debug_index = 0
@@ -718,9 +722,11 @@ class Client:
                     logger.error(data)
                     try:
                         message = data["error"]["message"]
-                        if message == "RateLimit" or message == "Rate Limit":
+                        if message == self.error_message["ratelimit"]:
                             print_("[!] RateLimit.")
                             time.sleep(180)
+                        elif message == self.error_message["invalid"]:
+                            self.access_token_get, self.expires_in = self.login()
                     except KeyError as e:
                         logger.error(f"{type(e)}: {str(e)}")
                         time.sleep(1)
@@ -733,14 +739,14 @@ class Client:
                         break
                     time.sleep(1)
         info = f"WORD: {word}\nUSERS: {self.option_['users']}\nILLUSTS: {len(self.queue['queue'])}"
-        print("")
-        print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-        print("")
+        #print("")
+        #print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+        #print("")
         notification(info)
 
     def recent(self):
         self.expires_check()
-        self.queue["name"] = f"recent: {self.aapi.user_id}"
+        self.queue["name"] = f"recent"
         next_qs = dict()
         init_offset = False
         debug_index = 0
@@ -777,12 +783,11 @@ class Client:
                     logger.error(data)
                     try:
                         message = data["error"]["message"]
-                        if message == "RateLimit" or message == "Rate Limit":
+                        if message == self.error_message["ratelimit"]:
                             print_("[!] RateLimit.")
                             time.sleep(180)
-                        elif message == '{"offset":["offset must be no more than 5000"]}':
-                            # next_qs = self.offsetLimitBypass(next_qs, start_date=create_date)
-                            time.sleep(1)
+                        elif message == self.error_message["invalid"]:
+                            self.access_token_get, self.expires_in = self.login()
                     except KeyError as e:
                         logger.error(f"{type(e)}: {str(e)}")
                         time.sleep(1)
@@ -895,9 +900,9 @@ banner = r"""
 menu = """
 [d] Download  [b] Bookmarks  [s] Search
 [r] Recent    [q] Queue      [R] Reload
-
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+print("")
 __version__ = "1.7"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
@@ -984,15 +989,16 @@ if __name__ == "__main__":
                 print(f"[{i + 1}] {qd_['time'].strftime('%Y-%m-%d %H:%M:%S')} | {qd_['name']} | {qd_['option']} | {qd_['size']}")
                 ql.append(key)
             try:
-                i = int(input_("[QUEUE] > "))
+                index = input_("[QUEUE] > ")
+                i = int(index)
                 if i == 0:
                     continue
                 client.queue = client.queue_list.pop(ql[i - 1])
+                pickle.dump(client.queue_list, open("./queue", "wb"))
                 client.download()
             except ValueError:
                 print_("[!] Error.")
                 pass
-
         elif mode == "R":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
