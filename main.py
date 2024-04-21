@@ -62,7 +62,8 @@ class Client:
             "ugoira": None,
             "r-18": None,
             "r-18g": None,
-            "page": [count()]
+            "page": [count()],
+            "ignore": settings["ignore"]["enable"]
         }
         self.reporter_run = settings["notification"]["report"]["enable"]
         self.error_message = {
@@ -251,6 +252,10 @@ class Client:
                                 with open("./queue", "wb") as f:
                                     pickle.dump(self.queue["queue"], f)
                                 print_("[!] No space left on device.")
+                                if "reporter_t" in locals():
+                                    self.reporter_run = False
+                                    reporter_t.join()
+                                    self.reporter_run = settings["notification"]["report"]["enable"]
                             elif type(e) is FileNotFoundError:
                                 logger.error(f"{type(e)}: {str(e)}")
                                 break
@@ -292,7 +297,8 @@ class Client:
             "ugoira": None,
             "r-18": None,
             "r-18g": None,
-            "page": [count()]
+            "page": [count()],
+            "ignore": settings["ignore"]["enable"]
         }
 
     def parse(self, illust):
@@ -367,7 +373,7 @@ class Client:
             logger.debug(f"queue append: {data['id']}")
 
     def check(self, id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type, x_restrict):
-        if settings["ignore"]["enable"]:
+        if self.option_["ignore"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
                 logger.debug("ignore")
@@ -502,14 +508,20 @@ class Client:
             else:  # 100page
                 page = [range(start)]
             self.option_["page"] = page
+        if "ignore-disable" in option:
+            self.option_["ignore"] = False
         if "illust-not" in option:
             self.option_["illust"] = False
         elif "illust" in option:
             self.option_["illust"] = True
         if "manga-not" in option:
             self.option_["manga"] = False
-        elif "mang" in option:
+        elif "manga" in option:
             self.option_["manga"] = True
+        if "ugoira-not" in option:
+            self.option_["ugoira"] = False
+        elif "ugoira" in option:
+            self.option_["ugoira"] = True
         if "r-18-not" in option:
             self.option_["r-18"] = False
         elif "r-18" in option:
@@ -837,14 +849,20 @@ class Client:
 
 def notification(message: str):
     def desktop(message: str):
-        notice.notify(title="Notification", message=message, app_name="SUBARU", app_icon="./icon.ico")
+        try:
+            notice.notify(title="Notification", message=message, app_name="SUBARU", app_icon="./icon.ico")
+        except Exception as e:
+            logger.debug(f"{type(e)}: {str(e)}")
 
     def discord(message: str):
         if settings["notification"]["discord"]["webhookUrl"] != "":
             if settings["notification"]["discord"]["mention"]["enable"]:
                 if settings["notification"]["discord"]["mention"]["discordId"] != "":
                     message = f"<@{settings['notification']['discord']['mention']['discordId']}>\n{message}"
-            DiscordWebhook(url=settings["notification"]["discord"]["webhookUrl"], content=message).execute()
+            try:
+                DiscordWebhook(url=settings["notification"]["discord"]["webhookUrl"], content=message).execute()
+            except Exception as e:
+                logger.debug(f"{type(e)}: {str(e)}")
 
     if settings["notification"]["enable"]:
         if settings["notification"]["desktop"]["enable"]:
@@ -983,22 +1001,25 @@ if __name__ == "__main__":
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
             print("")
             qd = client.queue_list
-            ql = list()
-            for i, key in zip(range(len(qd.keys())), qd.keys()):
-                qd_ = qd[key]
-                print(f"[{i + 1}] {qd_['time'].strftime('%Y-%m-%d %H:%M:%S')} | {qd_['name']} | {qd_['option']} | {qd_['size']}")
-                ql.append(key)
-            try:
-                index = input_("[QUEUE] > ")
-                i = int(index)
-                if i == 0:
-                    continue
-                client.queue = client.queue_list.pop(ql[i - 1])
-                pickle.dump(client.queue_list, open("./queue", "wb"))
-                client.download()
-            except ValueError:
-                print_("[!] Error.")
-                pass
+            if len(qd) != 0:
+                ql = list()
+                for i, key in zip(range(len(qd.keys())), qd.keys()):
+                    qd_ = qd[key]
+                    print_(f"[{i + 1}] {qd_['time'].strftime('%Y-%m-%d %H:%M:%S')} | {qd_['name']} | {qd_['option']} | {qd_['size']}")
+                    ql.append(key)
+                try:
+                    index = input_("[QUEUE] > ")
+                    i = int(index)
+                    if i == 0:
+                        continue
+                    client.queue = client.queue_list.pop(ql[i - 1])
+                    pickle.dump(client.queue_list, open("./queue", "wb"))
+                    client.download()
+                except ValueError:
+                    print_("[!] Error.")
+                    pass
+            else:
+                print_("Not found queue.")
         elif mode == "R":
             System.Clear()
             print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
