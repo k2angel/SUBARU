@@ -447,7 +447,8 @@ class Client:
             else:
                 old_path = self.stalker[uuid]
                 try:
-                    os.rename(os.path.join(settings["directory"], old_path), os.path.join(settings["directory"], path))
+                    os.rename(os.path.join(settings["directory"], f"{old_path}[{uuid}]"),
+                              os.path.join(settings["directory"], f"{path}[{uuid}]"))
                 except (FileNotFoundError, FileExistsError) as e:
                     logger.error(f"{type(e)}: {str(e)}")
                 self.stalker[uuid] = path
@@ -461,8 +462,9 @@ class Client:
             return path
 
     def option(self):
-        #default_option = settings["option"]
         option = input_("[OPTION] > ", hide_cursor=False)
+        if option == "":
+            option = settings["option"]
         self.queue["option"] = option
         logger.debug(option)
         if s := re.search(r"(\d+)users", option):
@@ -889,6 +891,10 @@ def load_settings():
         settings = tomllib.loads(res.text)
         with open("settings.toml", "w", encoding="utf-8") as f:
             print(res.text, f)
+    except tomllib.TOMLDecodeError as e:
+        print_(f"[!] settings.toml loading failed{str(e).replace('Unclosed array', '')}")
+        input()
+        exit()
     print_("[*] Load settings.")
     return settings
 
