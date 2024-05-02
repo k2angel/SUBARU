@@ -373,6 +373,10 @@ class Client:
             logger.debug(f"queue append: {data['id']}")
 
     def check(self, id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type, x_restrict):
+        def trans(path):
+            return path.translate(str.maketrans(
+                    {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
+                     '<': '＜', '>': '＞', '|': '｜'}))
         if self.option_["ignore"]:
             if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
                     settings["ignore"]["tag"]) or is_muted:
@@ -422,22 +426,16 @@ class Client:
             self.aapi.illust_bookmark_add(id)
         if settings["folder"]["enable"]:
             if settings["folder"]["follow_user"] and user["is_followed"]:
-                path = user["name"].translate(str.maketrans(
-                    {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
-                     '<': '＜', '>': '＞', '|': '｜'}))
-                return f"users/{self.stalker_check(str(user['id']), path)}[{user['id']}]"
+                return f"users/{self.stalker_check(str(user['id']), trans(user['name']))}[{user['id']}]"
             if user["id"] in settings["folder"]["user"]:
                 for fuser in settings["folder"]["user"]:
                     if fuser == user["id"]:
-                        path = user["name"].translate(str.maketrans(
-                            {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
-                             '<': '＜', '>': '＞', '|': '｜'}))
-                        return f"users/{self.stalker_check(str(user['id']), path)}[{user['id']}]"
+                        return f"users/{self.stalker_check(str(user['id']), trans(user['name']))}[{user['id']}]"
             if not set(tags).isdisjoint(settings["folder"]["tag"]):
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
                         # logger.debug(ftag)
-                        return "tags/"+ftag
+                        return "tags/"+trans(ftag)
         return True
 
     def stalker_check(self, uuid, path):
@@ -927,7 +925,7 @@ menu = """
 """
 print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
 print("")
-__version__ = "1.7.1"
+__version__ = "1.7.2"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
 
