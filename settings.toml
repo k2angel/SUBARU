@@ -4,6 +4,8 @@ refresh_token = ""
 # デフォルトオプション
 # 何も入力しなかった場合に適用
 option = ""
+# 自動ブックマーク
+bookmark = false
 
 [folder]
 # 機能スイッチ

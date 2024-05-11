@@ -16,7 +16,9 @@ import zipfile
 from collections import deque
 from itertools import count
 from logging import DEBUG, FileHandler, Formatter, getLogger
+from urllib.parse import urlparse
 
+import keyboard
 import tomli_w
 import webp
 from discord_webhook import DiscordWebhook
@@ -33,16 +35,11 @@ from urllib3.exceptions import ProtocolError
 
 class Client:
     def __init__(self, refresh_token):
+        self.option_ = None
+        self.queue = None
         self.aapi = AppPixivAPI()
         self.refresh_token = refresh_token
         self.access_token_get, self.expires_in = self.login()
-        self.queue = {
-            "queue": deque(),
-            "time": None,
-            "name": "",
-            "option": "",
-            "size": 0
-        }
         if not os.path.exists("./queue"):
             self.queue_list = dict()
             pickle.dump(self.queue_list, open("./queue", "wb"))
@@ -55,6 +52,22 @@ class Client:
         else:
             with open("./stalker.json", "r", encoding="utf-8") as f:
                 self.stalker = json.load(f)
+        self.init()
+        self.reporter_run = settings["notification"]["report"]["enable"]
+        self.error_message = {
+            "ratelimit": "Rate Limit",
+            "invalid": "Error occurred at the OAuth process. Please check your Access Token to fix this. "
+                       "Error Message: invalid_grant"
+        }
+
+    def init(self):
+        self.queue = {
+            "queue": deque(),
+            "time": None,
+            "name": "",
+            "option": "",
+            "size": 0
+        }
         self.option_ = {
             "users": 0,
             "illust": None,
@@ -62,14 +75,10 @@ class Client:
             "ugoira": None,
             "r-18": None,
             "r-18g": None,
+            "follow": None,
             "page": [count()],
-            "ignore": settings["ignore"]["enable"]
-        }
-        self.reporter_run = settings["notification"]["report"]["enable"]
-        self.error_message = {
-            "ratelimit": "Rate Limit",
-            "invalid": "Error occurred at the OAuth process. Please check your Access Token to fix this. "
-                       "Error Message: invalid_grant"
+            "ignore": settings["ignore"]["enable"],
+            "delete": False
         }
 
     def login(self):
@@ -113,9 +122,14 @@ class Client:
                 time.sleep(1)
             if not self.reporter_run:
                 break
-            info = f"LEFTOVER QUEUE: {len(self.queue['queue'])+1}"
+            info = f"LEFTOVER QUEUE: {len(self.queue['queue']) + 1}"
             notification(info)
         logger.debug("reporter stopped...")
+
+    def reporter_join(self, reporter_t: threading.Thread):
+        self.reporter_run = False
+        reporter_t.join()
+        self.reporter_run = True
 
     def download(self):
         def convert_size(size):
@@ -177,9 +191,11 @@ class Client:
                 logger.error(f"{type(e)}: {str(e)}")
 
         if qsize := len(self.queue["queue"]):
+            exit_ = False
             files_num = 0
             files_size = 0
             print_("[*] Download started.")
+            print("")
             notification("Download stared.")
             start = time.time()
             self.queue["time"] = datetime.datetime.now()
@@ -199,7 +215,10 @@ class Client:
                     os.makedirs(path, exist_ok=True)
                 post_id = data["id"]
                 attachments = data["attachments"]
-                for attachment in tqdm(attachments, desc="Attachments", leave=False):
+                asize = len(attachments)
+                if asize != 1:
+                    abar = tqdm(total=asize, desc="Attachments", leave=False)
+                for attachment in attachments:
                     file = os.path.join(path, os.path.basename(attachment))
                     if data["type"] == "ugoira":
                         u_format = settings['ugoira2gif']['format']
@@ -231,6 +250,8 @@ class Client:
                                 files_size = files_size + os.path.getsize(file)
                                 time.sleep(1)
                             files_num = files_num + 1
+                            if asize != 1:
+                                abar.update()
                             logger.debug(f"downloaded: {file}")
                             break
                         except (ProtocolError, UnidentifiedImageError, ChunkedEncodingError, ConnectionError,
@@ -238,24 +259,35 @@ class Client:
                             logger.error(f"{type(e)}: {str(e)}")
                             time.sleep(10)
                         except KeyboardInterrupt:
+                            if self.reporter_run:
+                                self.reporter_join(reporter_t)
+                            if asize != 1:
+                                abar.close()
+                            if qsize != 1:
+                                qbar.close()
                             print_("[*] Stopped.")
-                            if "reporter_t" in locals():
-                                self.reporter_run = False
-                                reporter_t.join()
-                                self.reporter_run = settings["notification"]["report"]["enable"]
-                            input()
-                            self.expires_check()
-                            if "reporter_t" in locals():
-                                reporter_t.start()
+                            print_("[?] Resume the queue? (y/n) > ")
+                            if keyboard.is_pressed("y"):
+                                print("")
+                                if qsize != 1:
+                                    qbar = tqdm(total=qsize, desc="Queue", leave=False, initial=i+1)
+                                if asize != 1:
+                                    abar = tqdm(total=len(attachments), desc="Attachments", leave=False,
+                                                initial=attachments.index(attachment))
+                                if self.reporter_run:
+                                    reporter_t = threading.Thread(target=self.reporter)
+                                    reporter_t.start()
+                            else:
+                                self.queue["queue"].appendleft(data)
+                                exit_ = True
+                                os.remove(file)
+                                break
                         except OSError as e:
                             if str(e) == "[Errno 28] No space left on device":
-                                with open("./queue", "wb") as f:
-                                    pickle.dump(self.queue["queue"], f)
                                 print_("[!] No space left on device.")
-                                if "reporter_t" in locals():
-                                    self.reporter_run = False
-                                    reporter_t.join()
-                                    self.reporter_run = settings["notification"]["report"]["enable"]
+                                pickle.dump(self.queue_list, open("./queue", "wb"))
+                                if self.reporter_run:
+                                    self.reporter_join(reporter_t)
                             elif type(e) is FileNotFoundError:
                                 logger.error(f"{type(e)}: {str(e)}")
                                 break
@@ -269,37 +301,31 @@ class Client:
                             os.remove(file)
                             input()
                             exit()
-                if "qbar" in locals():
+                if qsize != 1:
                     qbar.update()
                     self.queue["size"] = len(self.queue["queue"])
                     self.queue_list[str(start)] = self.queue
                     pickle.dump(self.queue_list, open("./queue", "wb"))
-            if "qbar" in locals():
+                if asize != 1:
+                    abar.close()
+                if exit_:
+                    break
+            if not exit_:
+                del self.queue_list[str(start)]
+                pickle.dump(self.queue_list, open("./queue", "wb"))
+            if qsize != 1:
                 qbar.close()
-            del self.queue_list[str(start)]
-            pickle.dump(self.queue_list, open("./queue", "wb"))
-            if "reporter_t" in locals():
-                self.reporter_run = False
-                reporter_t.join()
-                self.reporter_run = settings["notification"]["report"]["enable"]
+            if self.reporter_run and not exit_:
+                self.reporter_join(reporter_t)
             elapsed = time.time() - start
             info = f"TIME: {datetime.timedelta(seconds=elapsed)}\nFILES: {files_num}\nSIZE: {convert_size(files_size)}"
             print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+            print("")
             print_("[*] Download finished.")
             notification(f"Download finished.\n{info}")
         else:
             print_("[!] There is nothing in the queue.")
-        # init option
-        self.option_ = {
-            "users": 0,
-            "illust": None,
-            "manga": None,
-            "ugoira": None,
-            "r-18": None,
-            "r-18g": None,
-            "page": [count()],
-            "ignore": settings["ignore"]["enable"]
-        }
+        self.init()
 
     def parse(self, illust):
         id_ = illust["id"]
@@ -314,7 +340,7 @@ class Client:
             tag = tags[i]
             for vague in settings["folder"]["vague"]:
                 if tag in vague["vague"]:
-                    #logger.debug(f"{tag} -> {vague['tag']}")
+                    # logger.debug(f"{tag} -> {vague['tag']}")
                     tags[i] = tag.replace(tag, vague["tag"])
         total_bookmarks = illust["total_bookmarks"]
         is_bookmarked = illust["is_bookmarked"]
@@ -375,12 +401,17 @@ class Client:
     def check(self, id, user, tags, total_bookmarks, is_bookmarked, is_muted, illust_type, illust_ai_type, x_restrict):
         def trans(path):
             return path.translate(str.maketrans(
-                    {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
-                     '<': '＜', '>': '＞', '|': '｜'}))
+                {"　": " ", '\\': '＼', '/': '／', ':': '：', '*': '＊', '?': '？', '"': '”',
+                 '<': '＜', '>': '＞', '|': '｜'}))
+
         if self.option_["ignore"]:
-            if user["id"] in settings["ignore"]["user"] or not set(tags).isdisjoint(
-                    settings["ignore"]["tag"]) or is_muted:
-                logger.debug("ignore")
+            if user["id"] in settings["ignore"]["user"] or is_muted:
+                logger.debug(f"ignore user: {user['id']}")
+                return False
+            elif not set(tags).isdisjoint(settings["ignore"]["tag"]):
+                for itag in settings["ignore"]["tag"]:
+                    if itag in tags:
+                        logger.debug(f"ignore tag: {itag}")
                 return False
             if settings["ignore"]["ai_illust"]["enable"] and illust_ai_type == 2:
                 if not settings["ignore"]["ai_illust"]["follow_user"]:
@@ -392,22 +423,22 @@ class Client:
         if self.option_["users"] > total_bookmarks:
             logger.debug(f"ignore users: {self.option_['users']} > {total_bookmarks}")
             return False
-        if self.option_["illust"] and not illust_type == "illust":
+        if self.option_["illust"] and illust_type != "illust":
             logger.debug(f"exclusive illust: {illust_type}")
             return False
-        elif self.option_["illust"] is False and illust_type != "illust":
+        elif self.option_["illust"] is False and illust_type == "illust":
             logger.debug(f"ignore illust: {illust_type}")
             return False
-        if self.option_["manga"] and not illust_type == "manga":
+        if self.option_["manga"] and illust_type != "manga":
             logger.debug(f"exclusive manga: {illust_type}")
             return False
-        elif self.option_["manga"] is False and illust_type != "manga":
+        elif self.option_["manga"] is False and illust_type == "manga":
             logger.debug(f"ignore manga: {illust_type}")
             return False
-        if self.option_["ugoira"] and not illust_type == "ugoira":
+        if self.option_["ugoira"] and illust_type != "ugoira":
             logger.debug(f"exclusive ugoira: {illust_type}")
             return False
-        elif self.option_["ugoira"] is False and illust_type != "ugoira":
+        elif self.option_["ugoira"] is False and illust_type == "ugoira":
             logger.debug(f"ignore ugoira: {illust_type}")
             return False
         if self.option_["r-18"] and x_restrict == 0:
@@ -422,7 +453,13 @@ class Client:
         elif self.option_["r-18g"] is False and x_restrict == 2:
             logger.debug(f"ignore R-18G: {x_restrict}")
             return False
-        if not is_bookmarked:
+        if self.option_["follow"] and not user["is_followed"]:
+            logger.debug(f"exclusive follow user: {user['is_followed']}")
+            return False
+        elif self.option_["follow"] is False and user["is_followed"]:
+            logger.debug(f"ignore follow user: {user['is_followed']}")
+            return False
+        if not is_bookmarked and settings["bookmark"]:
             self.aapi.illust_bookmark_add(id)
         if settings["folder"]["enable"]:
             if settings["folder"]["follow_user"] and user["is_followed"]:
@@ -435,7 +472,7 @@ class Client:
                 for ftag in settings["folder"]["tag"]:
                     if ftag in tags:
                         # logger.debug(ftag)
-                        return "tags/"+trans(ftag)
+                        return "tags/" + trans(ftag)
         return True
 
     def stalker_check(self, uuid, path):
@@ -461,7 +498,7 @@ class Client:
 
     def option(self):
         option = input_("[OPTION] > ", hide_cursor=False)
-        if option == "":
+        if not option.split():
             option = settings["option"]
         self.queue["option"] = option
         logger.debug(option)
@@ -530,6 +567,10 @@ class Client:
             self.option_["r-18g"] = False
         elif "r-18g" in option:
             self.option_["r-18g"] = True
+        if "follow" in option:
+            self.option_["follow"] = True
+        elif "follow-not" in option:
+            self.option_["follow"] = False
         info = ", ".join([f"{key}={self.option_[key]}" for key in self.option_.keys()])
         logger.debug(f"OPTION: {info}")
 
@@ -648,7 +689,7 @@ class Client:
                     for illust in illusts:
                         self.parse(illust)
                     next_qs = self.aapi.parse_qs(data["next_url"])
-                    logger.debug(f"page: {debug_index}, offset: {debug_index*30}")
+                    logger.debug(f"page: {debug_index}, offset: {debug_index * 30}")
                     if next_qs["offset"] == "5010":
                         next_qs["start_date"] = str(datetime.datetime.fromisoformat(illusts[-1]["create_date"]).date())
                         next_qs["end_date"] = "2007-09-10"
@@ -751,9 +792,9 @@ class Client:
                         break
                     time.sleep(1)
         info = f"WORD: {word}\nUSERS: {self.option_['users']}\nILLUSTS: {len(self.queue['queue'])}"
-        #print("")
-        #print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
-        #print("")
+        # print("")
+        # print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+        # print("")
         notification(info)
 
     def recent(self):
@@ -879,6 +920,11 @@ def input_(text: str, hide_cursor=True):
     return Write.Input(Center.XCenter(text, spaces=spaces), Colors.green_to_black, interval=0, hide_cursor=hide_cursor)
 
 
+def print_banner():
+    System.Clear()
+    print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+
+
 def load_settings():
     try:
         with open("settings.toml", "rb") as f:
@@ -923,9 +969,9 @@ menu = """
 [d] Download  [b] Bookmarks  [s] Search
 [r] Recent    [q] Queue      [R] Reload
 """
-print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+print_banner()
 print("")
-__version__ = "1.7.2"
+__version__ = "1.7.3"
 System.Title(f"SUBARU v{__version__}")
 spaces = len(Center.XCenter(menu).split("\n")[0])
 
@@ -938,6 +984,7 @@ except IndexError as e:
     logger.error(f"{type(e)}: {str(e)}")
     print_("[!] refresh token is nothing.")
     from pixiv_auth import login
+
     refresh_token = login()
     if refresh_token not in settings["refresh_token"]:
         settings["refresh_token"] = refresh_token
@@ -949,13 +996,11 @@ console = Console()
 
 if __name__ == "__main__":
     while True:
-        System.Clear()
-        print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+        print_banner()
         print_(menu)
         mode = input_("[SUBARU] > ")
         if mode == "d":
-            System.Clear()
-            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print_banner()
             print("")
             urls = input_("[URL] > ").split()
             for url in urls:
@@ -968,13 +1013,13 @@ if __name__ == "__main__":
                         elif m.group(2) == "users":
                             client.user(m.group(3))
                     print_("[*] Fetch done.")
-            try:
-                client.download()
-            except Exception as e:
-                logger.error(f"{type(e)}: {str(e)}")
+            else:
+                try:
+                    client.download()
+                except Exception as e:
+                    logger.error(f"{type(e)}: {str(e)}")
         elif mode == "b" or mode == "r":
-            System.Clear()
-            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print_banner()
             print("")
             client.option()
             with console.status("[bold green]Fetching data...") as status:
@@ -988,28 +1033,28 @@ if __name__ == "__main__":
             except Exception as e:
                 logger.error(f"{type(e)}: {str(e)}")
         elif mode == "s":
-            System.Clear()
-            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print_banner()
             print("")
             word = input_("[WORD] > ", hide_cursor=False)
-            client.option()
-            try:
-                with console.status("[bold green]Fetching data...") as status:
-                    client.search(word)
-                print_("[*] Fetch done.")
-                client.download()
-            except Exception as e:
-                logger.error(f"{type(e)}: {str(e)}")
+            if word.split():
+                client.option()
+                try:
+                    with console.status("[bold green]Fetching data...") as status:
+                        client.search(word)
+                    print_("[*] Fetch done.")
+                    client.download()
+                except Exception as e:
+                    logger.error(f"{type(e)}: {str(e)}")
         elif mode == "q":
-            System.Clear()
-            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print_banner()
             print("")
             qd = client.queue_list
             if len(qd) != 0:
                 ql = list()
                 for i, key in zip(range(len(qd.keys())), qd.keys()):
                     qd_ = qd[key]
-                    print_(f"[{i + 1}] {qd_['time'].strftime('%Y-%m-%d %H:%M:%S')} | {qd_['name']} | {qd_['option']} | {qd_['size']}")
+                    print_(
+                        f"[{i + 1}] {qd_['time'].strftime('%Y-%m-%d %H:%M:%S')} | {qd_['name']} | {qd_['option']} | {qd_['size']}")
                     ql.append(key)
                 try:
                     index = input_("[QUEUE] > ")
@@ -1018,15 +1063,19 @@ if __name__ == "__main__":
                         continue
                     client.queue = client.queue_list.pop(ql[i - 1])
                     pickle.dump(client.queue_list, open("./queue", "wb"))
-                    client.download()
+                    try:
+                        client.download()
+                    except Exception as e:
+                        logger.error(f"{type(e)}: {str(e)}")
                 except ValueError:
-                    print_("[!] Error.")
                     pass
             else:
                 print_("Not found queue.")
         elif mode == "R":
-            System.Clear()
-            print(Colorate.Vertical(Colors.green_to_black, Center.Center(banner, yspaces=2), 3))
+            print_banner()
             print("")
             settings = load_settings()
+        elif mode == "e":
+            print_("[*] Exit.")
+            exit()
         input_("[*] Press ENTER to go back.")
