@@ -59,6 +59,11 @@ class Client:
             "invalid": "Error occurred at the OAuth process. Please check your Access Token to fix this. "
                        "Error Message: invalid_grant"
         }
+        try:
+            self.ugoira_format = {"gif": "gif", "webp": "webp", "apng": "png"}[settings['ugoira2gif']['format']]
+        except KeyError as e:
+            logger.error(f"{type(e)}: {str(e)}")
+            self.ugoira_format = "gif"
 
     def init(self):
         self.queue = {
@@ -139,57 +144,6 @@ class Client:
 
             return f"{size} {units[i]}"
 
-        def ugoira2gif(ugoira_zip, path, id, delays):
-            u_format = settings['ugoira2gif']['format']
-            if u_format == "gif" or u_format == "webp" or u_format == "apng":
-                if u_format == "apng":
-                    u_format = "png"
-            else:
-                return
-            output = os.path.join(path, f"{id}_p0 ugoira.{u_format}")
-            ctime = os.path.getctime(ugoira_zip)
-            images = list()
-            try:
-                with zipfile.ZipFile(ugoira_zip) as zf:
-                    files = zf.namelist()
-                    ugoira_path = str(os.path.join(settings["directory"], "ugoira", str(id)))
-                    zf.extractall(ugoira_path)
-                    delays_set = list(set(delays))
-                    gcd = math.gcd(*delays_set)
-            except zipfile.BadZipFile as e:
-                logger.error(f"{type(e)}: {str(e)}")
-            else:
-                for delay, file in zip(delays, files):
-                    image = Image.open(os.path.join(ugoira_path, file))
-                    if u_format == "gif" or u_format == "webp":
-                        image = image.quantize()
-                        # if image.mode != "RGB":
-                        #     image = image.convert("RGB")
-                    for _ in range(math.floor(delay / gcd)):
-                        images.append(image)
-                else:
-                    if u_format == "gif" or u_format == "png":
-                        try:
-                            images[0].save(
-                                output,
-                                save_all=True,
-                                append_images=images[1:],
-                                optimize=False,
-                                duration=gcd,
-                                loop=0,
-                            )
-                        except AttributeError as e:
-                            logger.error(f"{type(e)}: {str(e)}")
-                    elif u_format == "webp":
-                        webp.save_images(images, output, fps=(1000 / gcd))
-                    os.utime(output, times=(ctime, ctime))
-                    shutil.rmtree(ugoira_path)
-                    logger.debug(f"ugoira2gif: {ugoira_zip} -> {output}")
-            try:
-                os.remove(ugoira_zip)
-            except PermissionError as e:
-                logger.error(f"{type(e)}: {str(e)}")
-
         if qsize := len(self.queue["queue"]):
             exit_ = False
             files_num = 0
@@ -216,20 +170,13 @@ class Client:
                 post_id = data["id"]
                 attachments = data["attachments"]
                 asize = len(attachments)
-                if asize != 1:
-                    abar = tqdm(total=asize, desc="Attachments", leave=False)
+                abar = tqdm(total=asize, desc="Attachments", leave=False)
                 for attachment in attachments:
                     file = os.path.join(path, os.path.basename(attachment))
                     if data["type"] == "ugoira":
-                        u_format = settings['ugoira2gif']['format']
-                        if u_format == "gif" or u_format == "webp" or u_format == "apng":
-                            if u_format == "apng":
-                                u_format = "png"
-                            e_path = os.path.join(path, f"{post_id}_p0 ugoira.{u_format}")
-                            if os.path.exists(e_path):
-                                logger.debug(f"exists file: {e_path}")
-                                continue
-                        else:
+                        exists_path = os.path.join(path, f"{post_id}_p0 ugoira.{self.ugoira_format}")
+                        if os.path.exists(exists_path):
+                            logger.debug(f"exists file: {exists_path}")
                             continue
                     elif os.path.exists(file):
                         logger.debug(f"exists file: {file}")
@@ -241,17 +188,16 @@ class Client:
                             if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
                                 files_size = files_size + os.path.getsize(file)
                                 if settings["ugoira2gif"]["thread"]:
-                                    threading.Thread(target=ugoira2gif,
-                                                     args=(file, path, post_id, data["delays"])).start()
+                                    threading.Thread(target=self.ugoira2gif,
+                                                     args=(file, exists_path, post_id, data["delays"])).start()
                                 else:
-                                    ugoira2gif(file, path, data["id"], data["delays"])
+                                    self.ugoira2gif(file, exists_path, data["id"], data["delays"])
                             else:
                                 Image.open(file)
                                 files_size = files_size + os.path.getsize(file)
                                 time.sleep(1)
                             files_num = files_num + 1
-                            if asize != 1:
-                                abar.update()
+                            abar.update()
                             logger.debug(f"downloaded: {file}")
                             break
                         except (ProtocolError, UnidentifiedImageError, ChunkedEncodingError, ConnectionError,
@@ -261,8 +207,7 @@ class Client:
                         except KeyboardInterrupt:
                             if self.reporter_run:
                                 self.reporter_join(reporter_t)
-                            if asize != 1:
-                                abar.close()
+                            abar.close()
                             if qsize != 1:
                                 qbar.close()
                             print_("[*] Stopped.")
@@ -271,9 +216,8 @@ class Client:
                                 print("")
                                 if qsize != 1:
                                     qbar = tqdm(total=qsize, desc="Queue", leave=False, initial=i+1)
-                                if asize != 1:
-                                    abar = tqdm(total=len(attachments), desc="Attachments", leave=False,
-                                                initial=attachments.index(attachment))
+                                abar = tqdm(total=len(attachments), desc="Attachments", leave=False,
+                                            initial=attachments.index(attachment))
                                 if self.reporter_run:
                                     reporter_t = threading.Thread(target=self.reporter)
                                     reporter_t.start()
@@ -306,8 +250,7 @@ class Client:
                     self.queue["size"] = len(self.queue["queue"])
                     self.queue_list[str(start)] = self.queue
                     pickle.dump(self.queue_list, open("./queue", "wb"))
-                if asize != 1:
-                    abar.close()
+                abar.close()
                 if exit_:
                     break
             if not exit_:
@@ -326,6 +269,50 @@ class Client:
         else:
             print_("[!] There is nothing in the queue.")
         self.init()
+
+    def ugoira2gif(self, ugoira_zip, file, id_, delays):
+        ctime = os.path.getctime(ugoira_zip)
+        images = list()
+        try:
+            with zipfile.ZipFile(ugoira_zip) as zf:
+                files = zf.namelist()
+                ugoira_path = str(os.path.join(settings["directory"], "ugoira", str(id_)))
+                zf.extractall(ugoira_path)
+                delays_set = list(set(delays))
+                gcd = math.gcd(*delays_set)
+        except zipfile.BadZipFile as e:
+            logger.error(f"{type(e)}: {str(e)}")
+        else:
+            for delay, file in zip(delays, files):
+                image = Image.open(os.path.join(ugoira_path, file))
+                if self.ugoira_format == "gif" or self.ugoira_format == "webp":
+                    image = image.quantize()
+                    # if image.mode != "RGB":
+                    #     image = image.convert("RGB")
+                for _ in range(math.floor(delay / gcd)):
+                    images.append(image)
+            else:
+                if self.ugoira_format == "gif" or self.ugoira_format == "png":
+                    try:
+                        images[0].save(
+                            file,
+                            save_all=True,
+                            append_images=images[1:],
+                            optimize=False,
+                            duration=gcd,
+                            loop=0,
+                        )
+                    except AttributeError as e:
+                        logger.error(f"{type(e)}: {str(e)}")
+                elif self.ugoira_format == "webp":
+                    webp.save_images(images, file, fps=(1000 / gcd))
+                os.utime(file, times=(ctime, ctime))
+                shutil.rmtree(ugoira_path)
+                logger.debug(f"ugoira2gif: {ugoira_zip} -> {file}")
+        try:
+            os.remove(ugoira_zip)
+        except PermissionError as e:
+            logger.error(f"{type(e)}: {str(e)}")
 
     def parse(self, illust):
         id_ = illust["id"]
