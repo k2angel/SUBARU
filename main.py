@@ -211,8 +211,8 @@ class Client:
                             if qsize != 1:
                                 qbar.close()
                             print_("[*] Stopped.")
-                            print_("[?] Resume the queue? (y/n) > ")
-                            if keyboard.is_pressed("y"):
+                            resume = input_("[?] Resume the queue? (y/n) > ")
+                            if resume == "y":
                                 print("")
                                 if qsize != 1:
                                     qbar = tqdm(total=qsize, desc="Queue", leave=False, initial=i+1)
@@ -228,6 +228,11 @@ class Client:
                                 break
                         except OSError as e:
                             if str(e) == "[Errno 28] No space left on device":
+                                if self.reporter_run:
+                                    self.reporter_join(reporter_t)
+                                abar.close()
+                                if qsize != 1:
+                                    qbar.close()
                                 print_("[!] No space left on device.")
                                 pickle.dump(self.queue_list, open("./queue", "wb"))
                                 if self.reporter_run:
