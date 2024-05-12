@@ -275,7 +275,7 @@ class Client:
             print_("[!] There is nothing in the queue.")
         self.init()
 
-    def ugoira2gif(self, ugoira_zip, file, id_, delays):
+    def ugoira2gif(self, ugoira_zip, output, id_, delays):
         ctime = os.path.getctime(ugoira_zip)
         images = list()
         try:
@@ -300,7 +300,7 @@ class Client:
                 if self.ugoira_format == "gif" or self.ugoira_format == "png":
                     try:
                         images[0].save(
-                            file,
+                            output,
                             save_all=True,
                             append_images=images[1:],
                             optimize=False,
@@ -310,10 +310,10 @@ class Client:
                     except AttributeError as e:
                         logger.error(f"{type(e)}: {str(e)}")
                 elif self.ugoira_format == "webp":
-                    webp.save_images(images, file, fps=(1000 / gcd))
-                os.utime(file, times=(ctime, ctime))
+                    webp.save_images(images, output, fps=(1000 / gcd))
+                os.utime(output, times=(ctime, ctime))
                 shutil.rmtree(ugoira_path)
-                logger.debug(f"ugoira2gif: {ugoira_zip} -> {file}")
+                logger.debug(f"ugoira2gif: {ugoira_zip} -> {output}")
         try:
             os.remove(ugoira_zip)
         except PermissionError as e:
