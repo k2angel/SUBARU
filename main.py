@@ -86,29 +86,34 @@ class Client:
             "delete": False
         }
 
-    def login(self):
+    def login(self, silent=False):
         while True:
             try:
                 auth_data = self.aapi.auth(refresh_token=self.refresh_token)
             except PixivError as e:
                 logger.error(f"{type(e)}: {str(e)}")
                 if "RemoteDisconnected" in str(e):
-                    print_("[!] Authentication error!: RemoteDisconnected.")
+                    if not silent:
+                        print_("[!] Authentication error!: RemoteDisconnected.")
                 elif "refresh_token is set" in str(e):
-                    print_("[!] Authentication error!: refresh token is nothing.")
+                    if not silent:
+                        print_("[!] Authentication error!: refresh token is nothing.")
                     input()
                     exit()
                 elif "check refresh_token" in str(e):
-                    print_("[!] Authentication error!: Invalid refresh token.")
+                    if not silent:
+                        print_("[!] Authentication error!: Invalid refresh token.")
                     input()
                     exit()
                 else:
-                    print_("[!] Authentication error!")
+                    if not silent:
+                        print_("[!] Authentication error!")
             except Exception as e:
                 logger.error(f"{type(e)}: {str(e)}")
                 exit()
             else:
-                print_("[*] Login successfully!")
+                if not silent:
+                    print_("[*] Login successfully!")
                 logger.debug(auth_data)
                 return time.time(), auth_data["expires_in"]
 
@@ -181,75 +186,97 @@ class Client:
                     elif os.path.exists(file):
                         logger.debug(f"exists file: {file}")
                         continue
-
-                    while True:
+                    err_count = 0
+                    while not exit_:
                         try:
-                            self.aapi.download(attachment, path=path)
-                            if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
-                                files_size = files_size + os.path.getsize(file)
-                                if settings["ugoira2gif"]["thread"]:
-                                    threading.Thread(target=self.ugoira2gif,
-                                                     args=(file, exists_path, post_id, data["delays"])).start()
+                            try:
+                                self.aapi.download(attachment, path=path)
+                                if data["type"] == "ugoira" and settings["ugoira2gif"]["enable"]:
+                                    files_size = files_size + os.path.getsize(file)
+                                    if settings["ugoira2gif"]["thread"]:
+                                        threading.Thread(target=self.ugoira2gif,
+                                                         args=(file, exists_path, post_id, data["delays"])).start()
+                                    else:
+                                        self.ugoira2gif(file, exists_path, data["id"], data["delays"])
                                 else:
-                                    self.ugoira2gif(file, exists_path, data["id"], data["delays"])
-                            else:
-                                Image.open(file)
-                                files_size = files_size + os.path.getsize(file)
-                                time.sleep(1)
-                            files_num = files_num + 1
-                            abar.update()
-                            logger.debug(f"downloaded: {file}")
-                            break
-                        except (ProtocolError, UnidentifiedImageError, ChunkedEncodingError, ConnectionError,
-                                PixivError) as e:
-                            logger.error(f"{type(e)}: {str(e)}")
-                            time.sleep(10)
+                                    Image.open(file)
+                                    files_size = files_size + os.path.getsize(file)
+                                    time.sleep(1)
+                                files_num = files_num + 1
+                                abar.update()
+                                logger.debug(f"downloaded: {file}")
+                                break
+                            except (ProtocolError, UnidentifiedImageError, ChunkedEncodingError, ConnectionError,
+                                    PixivError) as e:
+                                logger.error(f"{type(e)}: {str(e)}")
+                                err_count = err_count + 1
+                                if err_count == 5:
+                                    os.remove(file)
+                                    logger.debug(f"deleted: {file}")
+                                    abar.update()
+                                    break
+                                else:
+                                    time.sleep(10)
                         except KeyboardInterrupt:
-                            if self.reporter_run:
+                            if "reporter_t" in locals():
                                 self.reporter_join(reporter_t)
                             abar.close()
                             if qsize != 1:
                                 qbar.close()
                             print_("[*] Stopped.")
                             resume = input_("[?] Resume the queue? (y/n) > ")
+                            print("")
                             if resume == "y":
-                                print("")
                                 if qsize != 1:
-                                    qbar = tqdm(total=qsize, desc="Queue", leave=False, initial=i+1)
+                                    qbar = tqdm(total=qsize, desc="Queue", leave=False, initial=i + 1)
                                 abar = tqdm(total=len(attachments), desc="Attachments", leave=False,
                                             initial=attachments.index(attachment))
-                                if self.reporter_run:
+                                if "reporter_t" in locals():
                                     reporter_t = threading.Thread(target=self.reporter)
                                     reporter_t.start()
                             else:
                                 self.queue["queue"].appendleft(data)
-                                exit_ = True
                                 os.remove(file)
+                                logger.debug(f"deleted: {file}")
+                                exit_ = True
                                 break
                         except OSError as e:
+                            logger.error(f"{type(e)}: {str(e)}")
                             if str(e) == "[Errno 28] No space left on device":
-                                if self.reporter_run:
+                                if "reporter_t" in locals():
                                     self.reporter_join(reporter_t)
                                 abar.close()
                                 if qsize != 1:
                                     qbar.close()
                                 print_("[!] No space left on device.")
                                 pickle.dump(self.queue_list, open("./queue", "wb"))
-                                if self.reporter_run:
-                                    self.reporter_join(reporter_t)
                             elif type(e) is FileNotFoundError:
-                                logger.error(f"{type(e)}: {str(e)}")
                                 break
                             else:
-                                logger.error(f"{type(e)}: {str(e)}")
-                            os.remove(file)
-                            input()
-                            exit()
+                                if "reporter_t" in locals():
+                                    self.reporter_join(reporter_t)
+                                abar.close()
+                                if qsize != 1:
+                                    qbar.close()
+                                self.queue["queue"].appendleft(data)
+                                os.remove(file)
+                                logger.debug(f"deleted: {file}")
+                                exit_ = True
+                                break
                         except Exception as e:
                             logger.error(f"{type(e)}: {str(e)}")
                             os.remove(file)
-                            input()
-                            exit()
+                            logger.debug(f"deleted: {file}")
+                            if "reporter_t" in locals():
+                                self.reporter_join(reporter_t)
+                            abar.close()
+                            if qsize != 1:
+                                qbar.close()
+                            self.queue["queue"].appendleft(data)
+                            os.remove(file)
+                            logger.debug(f"deleted: {file}")
+                            exit_ = True
+                            break
                 if qsize != 1:
                     qbar.update()
                     self.queue["size"] = len(self.queue["queue"])
@@ -263,7 +290,7 @@ class Client:
                 pickle.dump(self.queue_list, open("./queue", "wb"))
             if qsize != 1:
                 qbar.close()
-            if self.reporter_run and not exit_:
+            if "reporter_t" in locals() and not exit_:
                 self.reporter_join(reporter_t)
             elapsed = time.time() - start
             info = f"TIME: {datetime.timedelta(seconds=elapsed)}\nFILES: {files_num}\nSIZE: {convert_size(files_size)}"
@@ -568,31 +595,43 @@ class Client:
 
     def illust(self, id_):
         self.expires_check()
-        self.queue["name"] = f"illust: {id_}"
-        data = self.aapi.illust_detail(id_)
-        try:
-            illust = data["illust"]
-            self.parse(illust)
-        except PixivError as e:
-            if "RemoteDisconnected" in str(e):
-                print_("[!] RemoteDisconnected.")
-            else:
+        while True:
+            try:
+                data = self.aapi.illust_detail(id_)
+                self.queue["name"] = f"{data['illust']['title']}[{id_}]"
+                info = f"ID: {id_}\nNAME: {data['illust']['title']}\nAUTHOR: {data['illust']['user']['name']}"
+                illust = data["illust"]
+                self.parse(illust)
+                print("")
+                print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
+                print("")
+                notification(info)
+            except PixivError as e:
                 logger.error(f"{type(e)}: {str(e)}")
-            time.sleep(1)
-        except KeyError as e:
-            logger.debug(data)
-            logger.error(f"{type(e)}: {str(e)}")
-        else:
-            time.sleep(1)
+                time.sleep(1)
+            except KeyError as e:
+                logger.debug(data)
+                try:
+                    message = data["error"]["message"]
+                    if message == self.error_message["ratelimit"]:
+                        print_("[!] RateLimit.")
+                        time.sleep(180)
+                    elif message == self.error_message["invalid"]:
+                        self.access_token_get, self.expires_in = self.login()
+                except KeyError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
+                    time.sleep(1)
+            else:
+                return
 
     def user(self, id_):
         self.expires_check()
         while True:
             try:
-                user_info = self.aapi.user_detail(id_)
-                info = (f"ID: {user_info['user']['id']}\nNAME: {user_info['user']['name']}\n"
-                        f"ILLUSTS: {user_info['profile']['total_illusts'] + user_info['profile']['total_manga']}")
-                self.queue["name"] = f"{user_info['user']['name']}[{user_info['user']['id']}]"
+                data = self.aapi.user_detail(id_)
+                info = (f"ID: {data['user']['id']}\nNAME: {data['user']['name']}\n"
+                        f"ILLUSTS: {data['profile']['total_illusts'] + data['profile']['total_manga']}")
+                self.queue["name"] = f"{data['user']['name']}[{data['user']['id']}]"
                 print("")
                 print(Colorate.Vertical(Colors.green_to_black, Box.Lines(info), 3))
                 print("")
@@ -602,11 +641,26 @@ class Client:
                 time.sleep(1)
             except KeyError as e:
                 logger.error(f"{type(e)}: {str(e)}")
-                logger.error(user_info)
-                time.sleep(1)
+                logger.error(data)
+                try:
+                    message = data["error"]["message"]
+                    if message == self.error_message["ratelimit"]:
+                        print_("[!] RateLimit.")
+                        time.sleep(180)
+                    elif message == self.error_message["invalid"]:
+                        self.access_token_get, self.expires_in = self.login()
+                except KeyError as e:
+                    logger.error(f"{type(e)}: {str(e)}")
+                    time.sleep(1)
             else:
                 break
-        for type_ in ["illust", "manga"]:
+        if self.option_["illust"] or self.option_["ugoira"]:
+            type_l = ["illust"]
+        elif self.option_["manga"]:
+            type_l = ["manga"]
+        else:
+            type_l = ["illust", "manga"]
+        for type_ in type_l:
             next_qs = {"user_id": id_, "type": type_}
             init_offset = False
             page = copy.deepcopy(self.option_["page"])
@@ -674,7 +728,6 @@ class Client:
                 debug_index = debug_index + 1
                 if not init_offset:
                     next_qs["offset"] = i * 30
-
                 try:
                     data = self.aapi.user_bookmarks_illust(**next_qs)
                     illusts = data["illusts"]
@@ -860,25 +913,6 @@ class Client:
         print("")
         notification(info)
 
-    def novel(self, id):
-        # 小説内容
-        data = self.aapi.novel_detail(id)
-        novel = data["novel"]
-        user_name = novel["user"]["name"]
-        title = novel["title"]
-        caption = html.unescape(novel["caption"])
-        # HTML改行タグを変換
-        if "<br />" in caption:
-            caption = caption.replace("<br />", "\n")
-        novel_url = "https://pixiv.net/novel/show.php?id=%s" % novel["id"]
-        image_url = novel["image_urls"]["large"]
-        # 表紙をダウンロード
-        # aapi.download()
-        # 小説本文
-        json_result = self.aapi.novel_text(id)
-        text = json_result["novel_text"]
-        data = [title, user_name, caption, novel_url, image_url, text]
-
 
 def notification(message: str):
     def desktop(message: str):
@@ -996,9 +1030,11 @@ if __name__ == "__main__":
             print("")
             urls = input_("[URL] > ").split()
             for url in urls:
+                if re.match(r"https://(www\.)?pixiv\.net/users/(\d+)", url):
+                    client.option()
+                    break
+            for url in urls:
                 if m := re.match(r"https://(www\.)?pixiv\.net/(users|artworks)/(\d+)", url):
-                    if m.group(2) == "users" and len(urls) == 1:
-                        client.option()
                     with console.status("[bold green]Fetching data...") as status:
                         if m.group(2) == "artworks":
                             client.illust(m.group(3))
